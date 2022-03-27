@@ -26,7 +26,9 @@
  */
 
 #include <stdarg.h>
-#include <stdio.h>
+#ifndef __IPU__
+#include  <stdio.h>
+#endif
 
 #include "py/emit.h"
 #include "py/runtime.h"

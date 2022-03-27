@@ -92,7 +92,11 @@
 // *FORMAT-ON*
 
 #if MICROPY_NLR_SETJMP
+#ifndef __IPU__
 #include <setjmp.h>
+#else
+#include "ipusetjmp.h"
+#endif
 #endif
 
 typedef struct _nlr_buf_t nlr_buf_t;

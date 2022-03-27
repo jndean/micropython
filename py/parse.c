@@ -26,8 +26,14 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdio.h>
-#include <unistd.h> // for ssize_t
+#ifndef __IPU__
+#include  <stdio.h>
+#endif
+#ifndef __IPU__
+#include <unistd.h>
+#else
+#include <ipuunistd.h>
+#endif // for ssize_t
 #include <assert.h>
 #include <string.h>
 

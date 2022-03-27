@@ -28,7 +28,9 @@
 #include <string.h>
 #include <stdarg.h>
 #include <assert.h>
-#include <stdio.h>
+#ifndef __IPU__
+#include  <stdio.h>
+#endif
 
 #include "py/objlist.h"
 #include "py/objstr.h"

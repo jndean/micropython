@@ -26,7 +26,11 @@
  */
 
 #include <stdarg.h>
-#include <stdio.h>
+#if MICROPY_DEBUG_VERBOSE
+#ifndef __IPU__
+#include  <stdio.h>
+#endif
+#endif
 #include <string.h>
 #include <assert.h>
 

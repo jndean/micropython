@@ -25,8 +25,10 @@
  * THE SOFTWARE.
  */
 
+#ifndef __IPU__
+#include  <stdio.h>
+#endif
 #include <assert.h>
-#include <stdio.h>
 #include <string.h>
 
 #include "py/gc.h"

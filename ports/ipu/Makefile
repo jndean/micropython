@@ -42,11 +42,11 @@ LIBS =
 SRC_C = \
 	main.c \
 	uart_core.c \
-	shared/libc/printf.c \
-	shared/readline/readline.c \
-	shared/runtime/pyexec.c \
 	shared/runtime/stdout_helpers.c \
-	$(BUILD)/_frozen_mpy.c \
+	# $(BUILD)/_frozen_mpy.c \
+	# shared/libc/printf.c \
+	# shared/readline/readline.c \
+	# shared/runtime/pyexec.c \
 
 SRC_C += $(SRC_MOD)
 

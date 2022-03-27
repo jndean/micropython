@@ -26,7 +26,11 @@
  */
 
 #include <string.h>
+#ifndef __IPU__
 #include <unistd.h>
+#else
+#include <ipuunistd.h>
+#endif
 
 #include "py/objstr.h"
 #include "py/stream.h"

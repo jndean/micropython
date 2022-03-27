@@ -24,9 +24,12 @@
  * THE SOFTWARE.
  */
 
+
+#ifndef __IPU__
+#include  <stdio.h>
+#endif
 #include <assert.h>
 #include <string.h>
-#include <stdio.h>
 
 #include "py/mpstate.h"
 #include "py/qstr.h"

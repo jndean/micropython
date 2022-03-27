@@ -25,7 +25,9 @@
  */
 
 #include <string.h>
-#include <stdio.h>
+#ifndef __IPU__
+#include  <stdio.h>
+#endif
 #include <assert.h>
 
 #include "py/parsenumbase.h"

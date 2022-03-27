@@ -24,8 +24,10 @@
  * THE SOFTWARE.
  */
 
+#ifndef __IPU__
+#include  <stdio.h>
+#endif
 #include <stdint.h>
-#include <stdio.h>
 #include <stdarg.h>
 #include <assert.h>
 

@@ -24,6 +24,9 @@
  * THE SOFTWARE.
  */
 
+#ifdef __IPU__
+#include <ipustring.h>
+#endif
 #include <string.h>
 #include "py/obj.h"
 #include "py/objmodule.h"

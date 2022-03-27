@@ -42,7 +42,9 @@
 
 // for x in l[0:8]: can be compiled into a native loop if l has pointer type
 
-#include <stdio.h>
+#ifndef __IPU__
+#include  <stdio.h>
+#endif
 #include <string.h>
 #include <assert.h>
 

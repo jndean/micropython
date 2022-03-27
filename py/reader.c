@@ -24,7 +24,9 @@
  * THE SOFTWARE.
  */
 
-#include <stdio.h>
+#ifndef __IPU__
+#include  <stdio.h>
+#endif
 #include <assert.h>
 
 #include "py/runtime.h"
@@ -71,7 +73,11 @@ void mp_reader_new_mem(mp_reader_t *reader, const byte *buf, size_t len, size_t 
 
 #include <sys/stat.h>
 #include <fcntl.h>
+#ifndef __IPU__
 #include <unistd.h>
+#else
+#include <ipuunistd.h>
+#endif
 
 typedef struct _mp_reader_posix_t {
     bool close_fd;

@@ -24,7 +24,11 @@
  * THE SOFTWARE.
  */
 
-#include <unistd.h> // for ssize_t
+#ifndef __IPU__
+#include <unistd.h>
+#else
+#include <ipuunistd.h>
+#endif // for ssize_t
 #include <string.h>
 
 #include "py/mpconfig.h"

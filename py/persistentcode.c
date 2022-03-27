@@ -25,7 +25,9 @@
  */
 
 #include <stdint.h>
-#include <stdio.h>
+#ifndef __IPU__
+#include  <stdio.h>
+#endif
 #include <string.h>
 #include <assert.h>
 
@@ -637,7 +639,11 @@ void mp_raw_code_save(mp_compiled_module_t *cm, mp_print_t *print) {
 
 #if MICROPY_PERSISTENT_CODE_SAVE_FILE
 
+#ifndef __IPU__
 #include <unistd.h>
+#else
+#include <ipuunistd.h>
+#endif
 #include <sys/stat.h>
 #include <fcntl.h>
 
