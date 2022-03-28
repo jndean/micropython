@@ -292,14 +292,17 @@ extern "C" char *stack_top;
 static char heap[2048];
 #endif
 
+extern "C" char* stdout_head;
+
 
 class pyvertex: public poplar::Vertex {
     public:
-    poplar::InOut<poplar::Vector<char>> stack;
+    poplar::InOut<poplar::Vector<char>> stdout_tensor;
 
     bool compute() {
         // int stack_dummy;
         // stack_top = (char *)&stack_dummy;
+        stdout_head = &stdout_tensor[0];
         asm volatile(
             "mov %[stack_top], $m11"
             : [stack_top] "+r" (stack_top) : : 
@@ -338,6 +341,7 @@ class pyvertex: public poplar::Vertex {
         // // #endif
         // mp_deinit();
         // return 0;
+
         return true;
     }
 };

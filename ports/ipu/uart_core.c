@@ -24,11 +24,14 @@ int mp_hal_stdin_rx_chr(void) {
 }
 
 // Send string of given length
+char * stdout_head = 0;
 void mp_hal_stdout_tx_strn(const char *str, mp_uint_t len) {
     #if MICROPY_MIN_USE_STDOUT
     int r = write(STDOUT_FILENO, str, len);
     (void)r;
     #else
-    // TODO: ship outputs home
+    for (int i = 0; i < len; ++i) {
+        (*stdout_head++) = str[i];
+    }
     #endif
 }
