@@ -12,13 +12,15 @@
 
 // #define MICROPY_QSTR_EXTRA_POOL           mp_qstr_frozen_const_pool
 #define MICROPY_ENABLE_GC                 (1)
-#define MICROPY_HELPER_REPL               (1)
+#define MICROPY_HELPER_REPL               (0)
 #define MICROPY_MODULE_FROZEN_MPY         (0)
-#define MICROPY_ENABLE_EXTERNAL_IMPORT    (1)
+#define MICROPY_ENABLE_EXTERNAL_IMPORT    (0)
+
 
 // Desperate mitigations for IPU
 #define MICROPY_USE_INTERNAL_ERRNO        (1)
 #define MICROPY_ENABLE_PYSTACK            (1)
+#define MICROPY_NLR_SETJMP                (1)
 
 #define MICROPY_ALLOC_PATH_MAX            (256)
 #define MICROPY_ALLOC_PARSE_CHUNK_INIT    (16)

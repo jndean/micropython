@@ -1,3 +1,5 @@
+#ifndef _IPUSTRING_H
+#define _IPUSTRING_H
 
 typedef unsigned int size_t;
 
@@ -9,3 +11,5 @@ int strncmp (const char * str1, const char * str2, size_t num) {
     }
     return 0;
 }
+
+#endif // _IPUSTRING_H

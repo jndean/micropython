@@ -1,7 +1,8 @@
 .PHONY: make_build_dir clean
 
 PY_CORE_OBJ = $(addprefix $(BUILDDIR)/py/,\
-	mpstate.gp \
+	allfiles.gp)
+# mpstate.gp \
 	nlr.gp \
 	nlrx86.gp \
 	nlrx64.gp \
@@ -124,24 +125,26 @@ PY_CORE_OBJ = $(addprefix $(BUILDDIR)/py/,\
 BUILDDIR=ipubuild
 
 PORT_OBJ = \
-	uart_core.gp \
 	codelets.gp \
+	uart_core.gp \
 	shared/runtime/stdout_helpers.gp \
 
-OBJ += $(PY_CORE_OBJ) $(addprefix $(BUILDDIR)/, $(PORT_OBJ))
+OBJ += $(addprefix $(BUILDDIR)/, $(PORT_OBJ)) $(PY_CORE_OBJ)
 
 HARDCODEVARS=-DNDEBUG -DFFCONF_H=\"lib/oofatfs/ffconf.h\" -DMICROPY_ROM_TEXT_COMPRESSION=1
-WARNFLAGS=-Wall -Werror -Wdouble-promotion -Wfloat-conversion
+WARNFLAGS=-Wall -Wdouble-promotion -Wfloat-conversion # -Werror
 INC=-I. -I../.. -Ibuild
 LLVMFLAGS=-X -ffunction-sections -X -fdata-sections
 POPCFLAGS=--target=ipu2 -Os $(INC) $(WARNFLAGS) $(HARDCODEVARS) $(LLVMFLAGS)
 
-default: make_build_dir $(OBJ)
-	popc --target=ipu2 -Wl,--gc-sections -o $(BUILDDIR)/main.gp $(OBJ)
+default: make_build_dir $(BUILDDIR)/runcodelets $(OBJ)
+	popc -Wl,-Map=build/firmware.elf.map,--cref -Wl,--gc-sections $(POPCFLAGS) -o $(BUILDDIR)/main.gp $(OBJ)
 
 make_build_dir:
 	mkdir -p $(BUILDDIR)/py $(BUILDDIR)/shared/runtime
 
+$(BUILDDIR)/runcodelets: runcodelets.cpp
+	g++ runcodelets.cpp -std=c++17 -O2 -lpoplar -o $(BUILDDIR)/runcodelets
 
 $(BUILDDIR)/py/%.gp: ../../py/%.c
 	popc $(POPCFLAGS) -o $@ $< 
