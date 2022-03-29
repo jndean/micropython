@@ -15,6 +15,7 @@
 #define MICROPY_HELPER_REPL               (0)
 #define MICROPY_MODULE_FROZEN_MPY         (0)
 #define MICROPY_ENABLE_EXTERNAL_IMPORT    (0)
+#define MICROPY_PY_ARRAY                  (1)
 
 
 // Desperate mitigations for IPU

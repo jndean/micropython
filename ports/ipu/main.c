@@ -47,25 +47,25 @@ int main(int argc, char **argv) {
     #endif
 
     mp_init();
-    do_str("print('\\nhello world!')\nprint(list(x+1 for x in range(10)), end='\\n')", MP_PARSE_FILE_INPUT);//MP_PARSE_SINGLE_INPUT);
+    do_str("import uarray\nprint('\\n', uarray.array('b',[1,2,3,4,9]), end='\\n')", MP_PARSE_FILE_INPUT);//MP_PARSE_SINGLE_INPUT);
     
-    // #if MICROPY_ENABLE_COMPILER
-    // #if MICROPY_REPL_EVENT_DRIVEN
-    // pyexec_event_repl_init();
-    // for (;;) {
-    //     int c = mp_hal_stdin_rx_chr();
-    //     if (pyexec_event_repl_process_char(c)) {
-    //         break;
-    //     }
-    // }
-    // #else
+    #if MICROPY_ENABLE_COMPILER
+    #if MICROPY_REPL_EVENT_DRIVEN
+    pyexec_event_repl_init();
+    for (;;) {
+        int c = mp_hal_stdin_rx_chr();
+        if (pyexec_event_repl_process_char(c)) {
+            break;
+        }
+    }
+    #else
     // pyexec_friendly_repl();
-    // #endif
+    #endif
     // do_str("print('hello world!', list(x+1 for x in range(10)), end='eol\\n')", MP_PARSE_SINGLE_INPUT);
     // do_str("for i in range(10):\r\n  print(i)", MP_PARSE_FILE_INPUT);
-    // #else
+    #else
     // pyexec_frozen_module("frozentest.py");
-    // #endif
+    #endif
     mp_deinit();
     return 0;
 }

@@ -43,10 +43,10 @@ SRC_C = \
 	main.c \
 	uart_core.c \
 	shared/runtime/stdout_helpers.c \
-	# $(BUILD)/_frozen_mpy.c \
-	# shared/libc/printf.c \
-	# shared/readline/readline.c \
 	# shared/runtime/pyexec.c \
+	# shared/readline/readline.c \
+	# shared/libc/printf.c \
+	# $(BUILD)/_frozen_mpy.c \
 
 SRC_C += $(SRC_MOD)
 

@@ -1,138 +1,18 @@
 .PHONY: make_build_dir clean
 
 PY_CORE_OBJ = $(addprefix $(BUILDDIR)/py/,\
-	allfiles.gp)
-# mpstate.gp \
-	nlr.gp \
-	nlrx86.gp \
-	nlrx64.gp \
-	nlrthumb.gp \
-	nlraarch64.gp \
-	nlrpowerpc.gp \
-	nlrxtensa.gp \
-	nlrsetjmp.gp \
-	malloc.gp \
-	gc.gp \
-	pystack.gp \
-	qstr.gp \
-	vstr.gp \
-	mpprint.gp \
-	unicode.gp \
-	mpz.gp \
-	reader.gp \
-	lexer.gp \
-	parse.gp \
-	scope.gp \
-	compile.gp \
-	emitcommon.gp \
-	emitbc.gp \
-	asmbase.gp \
-	asmx64.gp \
-	emitnx64.gp \
-	asmx86.gp \
-	emitnx86.gp \
-	asmthumb.gp \
-	emitnthumb.gp \
-	emitinlinethumb.gp \
-	asmarm.gp \
-	emitnarm.gp \
-	asmxtensa.gp \
-	emitnxtensa.gp \
-	emitinlinextensa.gp \
-	emitnxtensawin.gp \
-	formatfloat.gp \
-	parsenumbase.gp \
-	parsenum.gp \
-	emitglue.gp \
-	persistentcode.gp \
-	runtime.gp \
-	runtime_utils.gp \
-	scheduler.gp \
-	nativeglue.gp \
-	pairheap.gp \
-	ringbuf.gp \
-	stackctrl.gp \
-	argcheck.gp \
-	warning.gp \
-	profile.gp \
-	map.gp \
-	obj.gp \
-	objarray.gp \
-	objattrtuple.gp \
-	objbool.gp \
-	objboundmeth.gp \
-	objcell.gp \
-	objclosure.gp \
-	objcomplex.gp \
-	objdeque.gp \
-	objdict.gp \
-	objenumerate.gp \
-	objexcept.gp \
-	objfilter.gp \
-	objfloat.gp \
-	objfun.gp \
-	objgenerator.gp \
-	objgetitemiter.gp \
-	objint.gp \
-	objint_longlong.gp \
-	objint_mpz.gp \
-	objlist.gp \
-	objmap.gp \
-	objmodule.gp \
-	objobject.gp \
-	objpolyiter.gp \
-	objproperty.gp \
-	objnone.gp \
-	objnamedtuple.gp \
-	objrange.gp \
-	objreversed.gp \
-	objset.gp \
-	objsingleton.gp \
-	objslice.gp \
-	objstr.gp \
-	objstrunicode.gp \
-	objstringio.gp \
-	objtuple.gp \
-	objtype.gp \
-	objzip.gp \
-	opmethods.gp \
-	sequence.gp \
-	stream.gp \
-	binary.gp \
-	builtinimport.gp \
-	builtinevex.gp \
-	builtinhelp.gp \
-	modarray.gp \
-	modbuiltins.gp \
-	modcollections.gp \
-	modgc.gp \
-	modio.gp \
-	modmath.gp \
-	modcmath.gp \
-	modmicropython.gp \
-	modstruct.gp \
-	modsys.gp \
-	moduerrno.gp \
-	modthread.gp \
-	vm.gp \
-	bc.gp \
-	showbc.gp \
-	repl.gp \
-	smallint.gp \
-	frozenmod.gp \
-	)
+	poppy.gp)
 
 BUILDDIR=ipubuild
 
 PORT_OBJ = \
 	codelets.gp \
-	uart_core.gp \
-	shared/runtime/stdout_helpers.gp \
+	# shared/runtime/stdout_helpers.gp \
 
 OBJ += $(addprefix $(BUILDDIR)/, $(PORT_OBJ)) $(PY_CORE_OBJ)
 
 HARDCODEVARS=-DNDEBUG -DFFCONF_H=\"lib/oofatfs/ffconf.h\" -DMICROPY_ROM_TEXT_COMPRESSION=1
-WARNFLAGS=-Wall -Wdouble-promotion -Wfloat-conversion # -Werror
+WARNFLAGS=-Wall -Wdouble-promotion -Wfloat-conversion -Werror
 INC=-I. -I../.. -Ibuild
 LLVMFLAGS=-X -ffunction-sections -X -fdata-sections
 POPCFLAGS=--target=ipu2 -Os $(INC) $(WARNFLAGS) $(HARDCODEVARS) $(LLVMFLAGS)
