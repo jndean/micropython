@@ -27,6 +27,7 @@ class pyvertex: public poplar::Vertex {
                 )
             )
         )
+        sum([1,2,3])
 
         #pragma poppy_end
 

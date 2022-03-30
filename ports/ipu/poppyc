@@ -4,6 +4,7 @@ import argparse
 import subprocess
 from tempfile import NamedTemporaryFile
 
+
 # Code tempaltes for insertion
 POPPPY_HEADER="""
 // ------------------------ This code was inserted by poppyc -------------------------- //

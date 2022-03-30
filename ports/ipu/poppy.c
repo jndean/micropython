@@ -41107,7 +41107,7 @@ static char poppy_heap[10*1024];
 #endif
 
 #if MICROPY_ENABLE_PYSTACK
-static mp_obj_t pystack[5 * 1024];
+static mp_obj_t poppy_pystack[5 * 1024];
 #endif
 
 void poppy_init(char *stdout_memory, char *poplar_stack_bottom) {
@@ -41122,7 +41122,7 @@ void poppy_init(char *stdout_memory, char *poplar_stack_bottom) {
     #endif
 
     #if MICROPY_ENABLE_PYSTACK
-    mp_pystack_init(pystack, &pystack[MP_ARRAY_SIZE(pystack)]);
+    mp_pystack_init(poppy_pystack, &poppy_pystack[MP_ARRAY_SIZE(poppy_pystack)]);
     #endif
 
     mp_init();

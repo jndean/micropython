@@ -9,7 +9,7 @@ OBJ += $(PORT_OBJ)$(PY_CORE_OBJ)
 
 HARDCODEVARS=-DNDEBUG -DFFCONF_H=\"lib/oofatfs/ffconf.h\" -DMICROPY_ROM_TEXT_COMPRESSION=1
 WARNFLAGS=-Wall -Wdouble-promotion -Wfloat-conversion -Werror
-INC=-I. -I../.. -Ibuild -I../../py
+INC= -I../.. -Ibuild -I../../py -I.
 LLVMFLAGS=-X -ffunction-sections -X -fdata-sections
 POPCFLAGS=--target=ipu2 -Os $(INC) $(WARNFLAGS) $(HARDCODEVARS) $(LLVMFLAGS)
 
