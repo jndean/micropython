@@ -41011,6 +41011,9 @@ size_t m_get_peak_bytes_allocated(void) {
 }
 #endif
 
+// ------------------------------------------ EXT modules --------------------------------------------- //
+
+// None
 
 // ----------------------------- "poppy" IPU port (here because I'm bad at linking) ------------------- //
 
@@ -41100,7 +41103,7 @@ void mp_hal_stdout_tx_strn_cooked(const char *str, size_t len) {
 }
 
 #if MICROPY_ENABLE_GC
-static char poppy_heap[2048];
+static char poppy_heap[10*1024];
 #endif
 
 #if MICROPY_ENABLE_PYSTACK

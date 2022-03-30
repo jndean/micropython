@@ -21,24 +21,29 @@ int main() {
   Graph graph(device.getTarget());
 
   // Create variable in IPU memory to store program outputs
-  unsigned N = 4096;  
-  char stdout_tensor_h[N] = {0};
-  unsigned v1size = 10;
-  int variable1_h[v1size] = {1, 2, 3};
-  Tensor stdout_tensor = graph.addVariable(CHAR, {N}, "stdout_tensor");
-  Tensor variable1 = graph.addVariable(INT, {v1size}, "stdout_tensor");
-  graph.setTileMapping(stdout_tensor, 0);
-  graph.setTileMapping(variable1, 0);
-  graph.createHostRead("stdout_tensor-read", stdout_tensor);
-  graph.createHostWrite("variable1-write", variable1);
-  graph.createHostRead("variable1-read", variable1);
+  unsigned printBufSize = 2000;
+  unsigned N = 10;
+  char printBuf_h[printBufSize] = {0};
+  int X_h[N] = {1, 2, 3, 4};
+  int Y_h[N] = {0};
+
+  Tensor printBuf = graph.addVariable(CHAR, {printBufSize}, "printBuf");
+  Tensor X = graph.addVariable(INT, {N}, "X");
+  Tensor Y = graph.addVariable(INT, {N}, "Y");
+  graph.setTileMapping(printBuf, 0);
+  graph.setTileMapping(X, 0);
+  graph.setTileMapping(Y, 0);
+  graph.createHostRead("printBuf-read", printBuf);
+  graph.createHostWrite("X-write", X);
+  graph.createHostRead("Y-read", Y);
 
   // Add computation vertext to IPU
-  graph.addCodelets("ipubuild/main.gp");
+  graph.addCodelets("build/main.gp");
   ComputeSet computeset = graph.addComputeSet("cs");
   VertexRef vtx = graph.addVertex(computeset, "pyvertex", {
-    {"stdout_tensor", stdout_tensor},
-    {"variable1", variable1}
+    {"printBuf", printBuf},
+    {"X", X},
+    {"Y", Y},
     });
   graph.setTileMapping(vtx, 0);
   
@@ -46,20 +51,16 @@ int main() {
   poplar::program::Execute program(computeset);
   Engine engine(graph, program);
   engine.load(device);
-  engine.writeTensor("variable1-write", variable1_h, &variable1_h[v1size]);
+  engine.writeTensor("X-write", X_h, &X_h[N]);
   engine.run(0);
-  engine.readTensor("stdout_tensor-read", stdout_tensor_h, &stdout_tensor_h[N]);
-  engine.readTensor("variable1-read", variable1_h, &variable1_h[v1size]);
+  engine.readTensor("printBuf-read", printBuf_h, &printBuf_h[printBufSize]);
+  engine.readTensor("Y-read", Y_h, &Y_h[N]);
 
   // Print output
-  for (int i = 0; i < N; ++i) {
-    if (stdout_tensor_h[i] == '\0') break;
-    printf("%c", stdout_tensor_h[i]);
-  }
-  printf("\n");
+  printf("STDOUT:\n%.*s\n", printBufSize, printBuf_h);
 
-  for (int i = 0; i < v1size; ++i) {
-    printf("%d ", variable1_h[i]);
+  for (int i = 0; i < N; ++i) {
+    printf("%d ", Y_h[i]);
   }
   printf("\n");
 

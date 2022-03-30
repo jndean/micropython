@@ -1,94 +1,38 @@
-include ../../py/mkenv.mk
+.PHONY: make_build_dir gen_hdrs clean
+
+BUILDDIR=build
+
+PY_CORE_OBJ = $(BUILDDIR)/poppy.gp
+PORT_OBJ = $(BUILDDIR)/codelets.gp 
+
+OBJ += $(PORT_OBJ)$(PY_CORE_OBJ)
+
+HARDCODEVARS=-DNDEBUG -DFFCONF_H=\"lib/oofatfs/ffconf.h\" -DMICROPY_ROM_TEXT_COMPRESSION=1
+WARNFLAGS=-Wall -Wdouble-promotion -Wfloat-conversion -Werror
+INC=-I. -I../.. -Ibuild -I../../py
+LLVMFLAGS=-X -ffunction-sections -X -fdata-sections
+POPCFLAGS=--target=ipu2 -Os $(INC) $(WARNFLAGS) $(HARDCODEVARS) $(LLVMFLAGS)
+
+default: make_build_dir gen_hdrs $(BUILDDIR)/runcodelets $(OBJ)
+	popc -Wl,-Map=build/firmware.elf.map,--cref -Wl,--gc-sections $(POPCFLAGS) -o $(BUILDDIR)/main.gp $(OBJ)
+
+make_build_dir:
+	mkdir -p $(BUILDDIR)/py $(BUILDDIR)/shared/runtime
+
+gen_hdrs:
+	make -f GENMakefile build/genhdr/compressed.data.h
+	make -f GENMakefile build/genhdr/qstrdefs.generated.h
+	make -f GENMakefile build/genhdr/moduledefs.h
+
+$(BUILDDIR)/runcodelets: runcodelets.cpp
+	g++ runcodelets.cpp -std=c++17 -O2 -lpoplar -o $(BUILDDIR)/runcodelets
+
+$(BUILDDIR)/%.gp: %.c
+	popc $(POPCFLAGS) -o $@ $< 
+
+$(BUILDDIR)/codelets.gp: codelets.cpp
+	./poppyc $(POPCFLAGS) -Wno-unused-function -o $@ -i $< 
 
 
-# qstr definitions (must come before including py.mk)
-QSTR_DEFS = qstrdefsport.h
-
-# MicroPython feature configurations
-MICROPY_ROM_TEXT_COMPRESSION ?= 1
-
-# include py core make definitions
-include $(TOP)/py/py.mk
-
-
-INC += -I.
-INC += -I$(TOP)
-INC += -I$(BUILD)
-
-LD = gcc
-CFLAGS = $(INC) -Wall -Werror -Wdouble-promotion -Wfloat-conversion -std=c99 $(COPT)
-LDFLAGS = -Wl,-Map=$@.map,--cref -Wl,--gc-sections
-
-CSUPEROPT = -Os # save some code space
-
-# Tune for Debugging or Optimization
-ifeq ($(DEBUG), 1)
-CFLAGS += -O0 -ggdb
-else
-CFLAGS += -Os -DNDEBUG
-CFLAGS += -fdata-sections -ffunction-sections
-endif
-
-# Flags for optional C++ source code
-CXXFLAGS += $(filter-out -std=c99,$(CFLAGS))
-CXXFLAGS += $(CXXFLAGS_MOD)
-
-# Flags for user C modules
-CFLAGS += $(CFLAGS_MOD)
-LDFLAGS += $(LDFLAGS_MOD)
-
-LIBS =
-
-SRC_C = \
-	main.c \
-	uart_core.c \
-	shared/runtime/stdout_helpers.c \
-	# shared/runtime/pyexec.c \
-	# shared/readline/readline.c \
-	# shared/libc/printf.c \
-	# $(BUILD)/_frozen_mpy.c \
-
-SRC_C += $(SRC_MOD)
-
-SRC_CXX += $(SRC_MOD_CXX)
-
-SRC_QSTR += $(SRC_MOD) $(SRC_MOD_CXX)
-
-OBJ += $(PY_CORE_O) $(addprefix $(BUILD)/, $(SRC_C:.c=.o))
-OBJ += $(addprefix $(BUILD)/, $(SRC_CXX:.cpp=.o))
-
-all: $(BUILD)/firmware.elf
-
-$(BUILD)/_frozen_mpy.c: frozentest.mpy $(BUILD)/genhdr/qstrdefs.generated.h
-	$(ECHO) "MISC freezing bytecode"
-	$(Q)$(TOP)/tools/mpy-tool.py -f -q $(BUILD)/genhdr/qstrdefs.preprocessed.h -mlongint-impl=none $< > $@
-
-$(BUILD)/firmware.elf: $(OBJ)
-	$(ECHO) "LINK $@"
-	$(Q)$(LD) $(LDFLAGS) -o $@ $^ $(LIBS)
-	$(Q)$(SIZE) $@
-
-$(BUILD)/firmware.bin: $(BUILD)/firmware.elf
-	$(Q)$(OBJCOPY) -O binary -j .isr_vector -j .text -j .data $^ $(BUILD)/firmware.bin
-
-$(BUILD)/firmware.dfu: $(BUILD)/firmware.bin
-	$(ECHO) "Create $@"
-	$(Q)$(PYTHON) $(DFU) -b 0x08000000:$(BUILD)/firmware.bin $@
-
-deploy: $(BUILD)/firmware.dfu
-	$(ECHO) "Writing $< to the board"
-	$(Q)$(PYTHON) $(PYDFU) -u $<
-
-# Run emulation build on a POSIX system with suitable terminal settings
-run:
-	stty raw opost -echo
-	build/firmware.elf
-	@echo Resetting terminal...
-# This sleep is useful to spot segfaults
-	sleep 1
-	reset
-
-test: $(BUILD)/firmware.elf
-	$(Q)/bin/echo -e "print('hello world!', list(x+1 for x in range(10)), end='eol\\\\n')\\r\\n\\x04" | $(BUILD)/firmware.elf | tail -n2 | grep "^hello world! \\[1, 2, 3, 4, 5, 6, 7, 8, 9, 10\\]eol"
-
-include $(TOP)/py/mkrules.mk
+clean: 
+	rm -r $(BUILDDIR)

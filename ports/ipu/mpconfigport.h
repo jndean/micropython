@@ -15,13 +15,25 @@
 #define MICROPY_HELPER_REPL               (0)
 #define MICROPY_MODULE_FROZEN_MPY         (0)
 #define MICROPY_ENABLE_EXTERNAL_IMPORT    (0)
-#define MICROPY_PY_ARRAY                  (1)
 
 
 // Desperate mitigations for IPU
 #define MICROPY_USE_INTERNAL_ERRNO        (1)
 #define MICROPY_ENABLE_PYSTACK            (1)
 #define MICROPY_NLR_SETJMP                (1)
+
+// Adding more interesting interpreter feaures
+#define MICROPY_PY_ARRAY                   (1)
+#define MICROPY_PY_BUILTINS_SLICE          (1)
+#define MICROPY_PY_ARRAY_SLICE_ASSIGN      (1)
+#define MICROPY_PY_BUILTINS_FILTER         (1)
+#define MICROPY_PY_BUILTINS_REVERSED       (1)
+#define MICROPY_PY_BUILTINS_SET            (1)
+#define MICROPY_PY_BUILTINS_ENUMERATE      (1)
+#define MICROPY_FLOAT_IMPL                 (MICROPY_FLOAT_IMPL_FLOAT)
+#define MICROPY_PY_COLLECTIONS             (1)
+#define MICROPY_PY_COLLECTIONS_DEQUE       (1)
+#define MICROPY_PY_UHEAPQ                  (0)
 
 #define MICROPY_ALLOC_PATH_MAX            (256)
 #define MICROPY_ALLOC_PARSE_CHUNK_INIT    (16)
@@ -36,22 +48,9 @@ typedef long mp_off_t;
 #define MICROPY_PORT_BUILTINS \
     { MP_ROM_QSTR(MP_QSTR_open), MP_ROM_PTR(&mp_builtin_open_obj) },
 
-// We need to provide a declaration/definition of alloca()
-// #include <xpu_alloca.h>
-
-
 
 #define MICROPY_HW_BOARD_NAME "ipu"
 #define MICROPY_HW_MCU_NAME "Colossus"
-
-#ifdef __linux__
-#define MICROPY_MIN_USE_STDOUT (1)
-#endif
-
-#ifdef __thumb__
-#define MICROPY_MIN_USE_CORTEX_CPU (0)
-#define MICROPY_MIN_USE_STM32_MCU (0)
-#endif
 
 #define MP_STATE_PORT MP_STATE_VM
 
