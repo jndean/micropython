@@ -30,9 +30,10 @@
 #define MICROPY_PY_BUILTINS_REVERSED       (1)
 #define MICROPY_PY_BUILTINS_SET            (1)
 #define MICROPY_PY_BUILTINS_ENUMERATE      (1)
+#define MICROPY_PY_BUILTINS_STR_SPLITLINES (1)
 #define MICROPY_FLOAT_IMPL                 (MICROPY_FLOAT_IMPL_FLOAT)
-#define MICROPY_PY_COLLECTIONS             (1)
-#define MICROPY_PY_COLLECTIONS_DEQUE       (1)
+#define MICROPY_PY_COLLECTIONS             (0)
+#define MICROPY_PY_COLLECTIONS_DEQUE       (0)
 #define MICROPY_PY_UHEAPQ                  (0)
 
 #define MICROPY_ALLOC_PATH_MAX            (256)

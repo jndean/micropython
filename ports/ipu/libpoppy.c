@@ -41027,7 +41027,7 @@ void gc_collect(void) {
     gc_collect_start();
     gc_collect_root(&stack_bottom, ((mp_uint_t)poppy_stack_top - (mp_uint_t)&stack_bottom) / sizeof(mp_uint_t));
     gc_collect_end();
-    gc_dump_info();
+    // gc_dump_info();
 }
 #endif
 
@@ -41043,8 +41043,8 @@ mp_obj_t mp_builtin_open(size_t n_args, const mp_obj_t *args, mp_map_t *kwargs) 
 MP_DEFINE_CONST_FUN_OBJ_KW(mp_builtin_open_obj, 1, mp_builtin_open);
 
 #if MICROPY_PY_ARRAY
-void poppy_add_memory_as_array(const char* name, void* data, size_t num_elts) {
-    mp_obj_array_t* var = array_new('i', 0);
+void poppy_add_memory_as_array(const char* name, void* data, size_t num_elts, char dtype) {
+    mp_obj_array_t* var = array_new(dtype, 0);
     var->items = data;
     var->len = num_elts;
     mp_obj_t key = mp_obj_new_str(name, strlen(name));
@@ -41103,7 +41103,7 @@ void mp_hal_stdout_tx_strn_cooked(const char *str, size_t len) {
 }
 
 #if MICROPY_ENABLE_GC
-static char poppy_heap[10*1024];
+static char poppy_heap[150*1024];
 #endif
 
 #if MICROPY_ENABLE_PYSTACK

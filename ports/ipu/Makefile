@@ -2,10 +2,8 @@
 
 BUILDDIR=build
 
-PY_CORE_OBJ = $(BUILDDIR)/poppy.gp
-PORT_OBJ = $(BUILDDIR)/codelets.gp 
+OBJ = $(BUILDDIR)/libpoppy.gp
 
-OBJ += $(PORT_OBJ)$(PY_CORE_OBJ)
 
 HARDCODEVARS=-DNDEBUG -DFFCONF_H=\"lib/oofatfs/ffconf.h\" -DMICROPY_ROM_TEXT_COMPRESSION=1
 WARNFLAGS=-Wall -Wdouble-promotion -Wfloat-conversion -Werror
@@ -14,7 +12,7 @@ LLVMFLAGS=-X -ffunction-sections -X -fdata-sections
 POPCFLAGS=--target=ipu2 -Os $(INC) $(WARNFLAGS) $(HARDCODEVARS) $(LLVMFLAGS)
 
 default: make_build_dir gen_hdrs $(BUILDDIR)/runcodelets $(OBJ)
-	popc -Wl,-Map=build/firmware.elf.map,--cref -Wl,--gc-sections $(POPCFLAGS) -o $(BUILDDIR)/main.gp $(OBJ)
+	popc $(POPCFLAGS) -o $(BUILDDIR)/main.gp $(OBJ)
 
 make_build_dir:
 	mkdir -p $(BUILDDIR)/py $(BUILDDIR)/shared/runtime
@@ -29,9 +27,6 @@ $(BUILDDIR)/runcodelets: runcodelets.cpp
 
 $(BUILDDIR)/%.gp: %.c
 	popc $(POPCFLAGS) -o $@ $< 
-
-$(BUILDDIR)/codelets.gp: codelets.cpp
-	./poppyc $(POPCFLAGS) -Wno-unused-function -o $@ -i $< 
 
 
 clean: 
