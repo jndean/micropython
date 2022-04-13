@@ -23,7 +23,9 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#ifndef __IPU__
 #include <inttypes.h>
+#endif
 
 #ifndef LFS2_NO_MALLOC
 #include <stdlib.h>
@@ -35,7 +37,9 @@
         !defined(LFS2_NO_WARN) || \
         !defined(LFS2_NO_ERROR) || \
         defined(LFS2_YES_TRACE)
+#ifndef __IPU__
 #include <stdio.h>
+#endif
 #endif
 
 #ifdef __cplusplus

@@ -6,7 +6,7 @@ OBJ = $(BUILDDIR)/libpoppy.gp
 
 
 HARDCODEVARS=-DNDEBUG -DFFCONF_H=\"lib/oofatfs/ffconf.h\" -DMICROPY_ROM_TEXT_COMPRESSION=1
-WARNFLAGS=-Wall -Wdouble-promotion -Wfloat-conversion -Werror
+WARNFLAGS=-Wall -Wdouble-promotion -Wfloat-conversion -Wno-unused-function -Werror #-Wfatal-errors
 INC= -I../.. -Ibuild -I../../py -I.
 LLVMFLAGS=-X -ffunction-sections -X -fdata-sections
 POPCFLAGS=--target=ipu2 -Os $(INC) $(WARNFLAGS) $(HARDCODEVARS) $(LLVMFLAGS)

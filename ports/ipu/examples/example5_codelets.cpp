@@ -44,6 +44,7 @@ class TensorBlockDevice:
 
     def readblocks(self, block_num, buf, offset=0):
         addr = block_num * self.block_size + offset
+        poppyyield
         for i in range(len(buf)):
             buf[i] = __diskimg[addr + i]
 

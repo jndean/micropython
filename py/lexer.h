@@ -80,6 +80,7 @@ typedef enum _mp_token_kind_t {
     MP_TOKEN_KW_ELIF,
     MP_TOKEN_KW_ELSE,
     MP_TOKEN_KW_EXCEPT,
+    MP_TOKEN_KW_EXCHANGE,
     MP_TOKEN_KW_FINALLY,
     MP_TOKEN_KW_FOR,
     MP_TOKEN_KW_FROM,

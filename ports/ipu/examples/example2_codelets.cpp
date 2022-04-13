@@ -11,7 +11,8 @@ class ComplexOp: public poplar::Vertex {
         
         #pragma poppy_start [stdout=printBuf, X=X<float>]
         
-        print('Beginning ComplexOp...')
+        import uos
+        print('Beginning ComplexOp...', uos.mount)
 
         class Worker:
             def __init__(self, X):

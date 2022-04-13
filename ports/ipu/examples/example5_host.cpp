@@ -52,7 +52,7 @@ int main() {
   DataStream diskOutStream = graph.addDeviceToHostFIFO("diskImg-out-stream", poplar::CHAR, diskSize);
 
   // Add computation vertext to IPU
-  graph.addCodelets("example4_codelets.gp");
+  graph.addCodelets("example5_codelets.gp");
   ComputeSet init_computeset = graph.addComputeSet("InitCS");
   ComputeSet body_computeset = graph.addComputeSet("BodyCS");
   VertexRef int_vtx = graph.addVertex(init_computeset, "InitVertex", {

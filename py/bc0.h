@@ -147,4 +147,7 @@
 #define MP_BC_IMPORT_FROM                   (MP_BC_BASE_QSTR_O + 0x0c) // qstr
 #define MP_BC_IMPORT_STAR                   (MP_BC_BASE_BYTE_E + 0x09)
 
+
+#define MP_BC_EXCHANGE                      (MP_BC_BASE_BYTE_E + 0x0b)
+
 #endif // MICROPY_INCLUDED_PY_BC0_H

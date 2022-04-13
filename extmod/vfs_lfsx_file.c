@@ -24,7 +24,9 @@
  * THE SOFTWARE.
  */
 
+#ifndef __IPU__
 #include <stdio.h>
+#endif
 #include <string.h>
 
 #include "py/runtime.h"

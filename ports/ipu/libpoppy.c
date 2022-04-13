@@ -5003,6 +5003,7 @@ STATIC const char *const tok_kw[] = {
     "elif",
     "else",
     "except",
+    "exchange",
     "finally",
     "for",
     "from",
@@ -8017,6 +8018,10 @@ STATIC void compile_break_cont_stmt(compiler_t *comp, mp_parse_node_struct_t *pn
     }
     assert(comp->cur_except_level >= comp->break_continue_except_level);
     EMIT_ARG(unwind_jump, label, comp->cur_except_level - comp->break_continue_except_level);
+}
+
+STATIC void compile_exchange_stmt(compiler_t *comp, mp_parse_node_struct_t *pns) {
+    EMIT(exchange);
 }
 
 STATIC void compile_return_stmt(compiler_t *comp, mp_parse_node_struct_t *pns) {
@@ -11213,6 +11218,10 @@ void mp_emit_bc_dup_top_two(emit_t *emit) {
 
 void mp_emit_bc_pop_top(emit_t *emit) {
     emit_write_bytecode_byte(emit, -1, MP_BC_POP_TOP);
+}
+
+void mp_emit_bc_exchange(emit_t *emit) {
+    emit_write_bytecode_byte(emit, 0, MP_BC_EXCHANGE);
 }
 
 void mp_emit_bc_rot_two(emit_t *emit) {
@@ -38549,6 +38558,11 @@ dispatch_loop:
                     sp[-2] = top;
                     DISPATCH();
                 }
+                
+                ENTRY(MP_BC_EXCHANGE): {
+                    mp_hal_stdout_tx_strn("Exchange triggered\n", 19);
+                    DISPATCH();
+                }
 
                 ENTRY(MP_BC_JUMP): {
                     DECODE_SLABEL;
@@ -40812,6 +40826,7639 @@ mp_import_stat_t mp_find_frozen_module(const char *str, int *frozen_type, void *
 #endif // MICROPY_MODULE_FROZEN
 
 
+
+// ------------------------------------------ EXT modules --------------------------------------------- //
+
+// Some dodgy stuff I'm adding to make the lfs library happy
+
+int printf(const char *format, ...){
+    return 0;
+}
+#define PRIu32 "u"
+#define PRIx32 "x"
+#define PRIu16 "u"
+#define PRIx16 "x"
+#define LFS2_NO_MALLOC 1
+
+#include "lib/littlefs/lfs2.h"
+#include "lib/littlefs/lfs2_util.h"
+
+// </dodgy>
+
+// ----------------------- EXT uos module --------------------------- //
+#include "py/objstr.h"
+#include "py/runtime.h"
+
+#if MICROPY_PY_UOS
+
+#include "extmod/misc.h"
+#include "extmod/vfs.h"
+
+#if MICROPY_VFS_FAT
+#include "extmod/vfs_fat.h"
+#endif
+
+#if MICROPY_VFS_LFS1 || MICROPY_VFS_LFS2
+#include "extmod/vfs_lfs.h"
+#endif
+
+#if MICROPY_VFS_POSIX
+#include "extmod/vfs_posix.h"
+#endif
+
+#if MICROPY_PY_UOS_UNAME
+#include "genhdr/mpversion.h"
+#endif
+
+#ifdef MICROPY_PY_UOS_INCLUDEFILE
+#include MICROPY_PY_UOS_INCLUDEFILE
+#endif
+
+#ifdef MICROPY_BUILD_TYPE
+#define MICROPY_BUILD_TYPE_PAREN " (" MICROPY_BUILD_TYPE ")"
+#else
+#define MICROPY_BUILD_TYPE_PAREN
+#endif
+
+#if MICROPY_PY_UOS_UNAME
+
+#if MICROPY_PY_UOS_UNAME_RELEASE_DYNAMIC
+#define CONST_RELEASE
+#else
+#define CONST_RELEASE const
+#endif
+
+STATIC const qstr mp_uos_uname_info_fields[] = {
+    MP_QSTR_sysname,
+    MP_QSTR_nodename,
+    MP_QSTR_release,
+    MP_QSTR_version,
+    MP_QSTR_machine
+};
+STATIC const MP_DEFINE_STR_OBJ(mp_uos_uname_info_sysname_obj, MICROPY_PY_SYS_PLATFORM);
+STATIC const MP_DEFINE_STR_OBJ(mp_uos_uname_info_nodename_obj, MICROPY_PY_SYS_PLATFORM);
+STATIC CONST_RELEASE MP_DEFINE_STR_OBJ(mp_uos_uname_info_release_obj, MICROPY_VERSION_STRING);
+STATIC const MP_DEFINE_STR_OBJ(mp_uos_uname_info_version_obj, MICROPY_GIT_TAG " on " MICROPY_BUILD_DATE MICROPY_BUILD_TYPE_PAREN);
+STATIC const MP_DEFINE_STR_OBJ(mp_uos_uname_info_machine_obj, MICROPY_HW_BOARD_NAME " with " MICROPY_HW_MCU_NAME);
+
+STATIC MP_DEFINE_ATTRTUPLE(
+    mp_uos_uname_info_obj,
+    mp_uos_uname_info_fields,
+    5,
+    MP_ROM_PTR(&mp_uos_uname_info_sysname_obj),
+    MP_ROM_PTR(&mp_uos_uname_info_nodename_obj),
+    MP_ROM_PTR(&mp_uos_uname_info_release_obj),
+    MP_ROM_PTR(&mp_uos_uname_info_version_obj),
+    MP_ROM_PTR(&mp_uos_uname_info_machine_obj)
+    );
+
+STATIC mp_obj_t mp_uos_uname(void) {
+    #if MICROPY_PY_UOS_UNAME_RELEASE_DYNAMIC
+    const char *release = mp_uos_uname_release();
+    mp_uos_uname_info_release_obj.len = strlen(release);
+    mp_uos_uname_info_release_obj.data = (const byte *)release;
+    #endif
+    return MP_OBJ_FROM_PTR(&mp_uos_uname_info_obj);
+}
+STATIC MP_DEFINE_CONST_FUN_OBJ_0(mp_uos_uname_obj, mp_uos_uname);
+
+#endif
+
+STATIC const mp_rom_map_elem_t os_module_globals_table[] = {
+    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_uos) },
+
+    #if MICROPY_PY_UOS_GETENV_PUTENV_UNSETENV
+    { MP_ROM_QSTR(MP_QSTR_getenv), MP_ROM_PTR(&mp_uos_getenv_obj) },
+    { MP_ROM_QSTR(MP_QSTR_putenv), MP_ROM_PTR(&mp_uos_putenv_obj) },
+    { MP_ROM_QSTR(MP_QSTR_unsetenv), MP_ROM_PTR(&mp_uos_unsetenv_obj) },
+    #endif
+    #if MICROPY_PY_UOS_SEP
+    { MP_ROM_QSTR(MP_QSTR_sep), MP_ROM_QSTR(MP_QSTR__slash_) },
+    #endif
+    #if MICROPY_PY_UOS_SYNC
+    { MP_ROM_QSTR(MP_QSTR_sync), MP_ROM_PTR(&mp_uos_sync_obj) },
+    #endif
+    #if MICROPY_PY_UOS_SYSTEM
+    { MP_ROM_QSTR(MP_QSTR_system), MP_ROM_PTR(&mp_uos_system_obj) },
+    #endif
+    #if MICROPY_PY_UOS_UNAME
+    { MP_ROM_QSTR(MP_QSTR_uname), MP_ROM_PTR(&mp_uos_uname_obj) },
+    #endif
+    #if MICROPY_PY_UOS_URANDOM
+    { MP_ROM_QSTR(MP_QSTR_urandom), MP_ROM_PTR(&mp_uos_urandom_obj) },
+    #endif
+
+    #if MICROPY_VFS
+    { MP_ROM_QSTR(MP_QSTR_chdir), MP_ROM_PTR(&mp_vfs_chdir_obj) },
+    { MP_ROM_QSTR(MP_QSTR_getcwd), MP_ROM_PTR(&mp_vfs_getcwd_obj) },
+    { MP_ROM_QSTR(MP_QSTR_listdir), MP_ROM_PTR(&mp_vfs_listdir_obj) },
+    { MP_ROM_QSTR(MP_QSTR_mkdir), MP_ROM_PTR(&mp_vfs_mkdir_obj) },
+    { MP_ROM_QSTR(MP_QSTR_remove), MP_ROM_PTR(&mp_vfs_remove_obj) },
+    { MP_ROM_QSTR(MP_QSTR_rename), MP_ROM_PTR(&mp_vfs_rename_obj) },
+    { MP_ROM_QSTR(MP_QSTR_rmdir), MP_ROM_PTR(&mp_vfs_rmdir_obj) },
+    { MP_ROM_QSTR(MP_QSTR_stat), MP_ROM_PTR(&mp_vfs_stat_obj) },
+    { MP_ROM_QSTR(MP_QSTR_statvfs), MP_ROM_PTR(&mp_vfs_statvfs_obj) },
+    { MP_ROM_QSTR(MP_QSTR_unlink), MP_ROM_PTR(&mp_vfs_remove_obj) }, // unlink aliases to remove
+    #endif
+
+    // The following are MicroPython extensions.
+
+    #if MICROPY_PY_OS_DUPTERM
+    { MP_ROM_QSTR(MP_QSTR_dupterm), MP_ROM_PTR(&mp_uos_dupterm_obj) },
+    #endif
+    #if MICROPY_PY_UOS_DUPTERM_NOTIFY
+    { MP_ROM_QSTR(MP_QSTR_dupterm_notify), MP_ROM_PTR(&mp_uos_dupterm_notify_obj) },
+    #endif
+    #if MICROPY_PY_UOS_ERRNO
+    { MP_ROM_QSTR(MP_QSTR_errno), MP_ROM_PTR(&mp_uos_errno_obj) },
+    #endif
+
+    #if MICROPY_VFS
+    { MP_ROM_QSTR(MP_QSTR_ilistdir), MP_ROM_PTR(&mp_vfs_ilistdir_obj) },
+    { MP_ROM_QSTR(MP_QSTR_mount), MP_ROM_PTR(&mp_vfs_mount_obj) },
+    { MP_ROM_QSTR(MP_QSTR_umount), MP_ROM_PTR(&mp_vfs_umount_obj) },
+    #if MICROPY_VFS_FAT
+    { MP_ROM_QSTR(MP_QSTR_VfsFat), MP_ROM_PTR(&mp_fat_vfs_type) },
+    #endif
+    #if MICROPY_VFS_LFS1
+    { MP_ROM_QSTR(MP_QSTR_VfsLfs1), MP_ROM_PTR(&mp_type_vfs_lfs1) },
+    #endif
+    #if MICROPY_VFS_LFS2
+    { MP_ROM_QSTR(MP_QSTR_VfsLfs2), MP_ROM_PTR(&mp_type_vfs_lfs2) },
+    #endif
+    #if MICROPY_VFS_POSIX
+    { MP_ROM_QSTR(MP_QSTR_VfsPosix), MP_ROM_PTR(&mp_type_vfs_posix) },
+    #endif
+    #endif
+};
+STATIC MP_DEFINE_CONST_DICT(os_module_globals, os_module_globals_table);
+
+const mp_obj_module_t mp_module_uos = {
+    .base = { &mp_type_module },
+    .globals = (mp_obj_dict_t *)&os_module_globals,
+};
+
+#endif // MICROPY_PY_UOS
+
+
+// ---------------- EXT VFS module -------------------- //
+
+
+#include <stdint.h>
+#include <string.h>
+
+#include "py/runtime.h"
+#include "py/objstr.h"
+#include "py/mperrno.h"
+#include "extmod/vfs.h"
+
+#if MICROPY_VFS
+
+#if MICROPY_VFS_FAT
+#include "extmod/vfs_fat.h"
+#endif
+
+#if MICROPY_VFS_LFS1 || MICROPY_VFS_LFS2
+#include "extmod/vfs_lfs.h"
+#endif
+
+#if MICROPY_VFS_POSIX
+#include "extmod/vfs_posix.h"
+#endif
+
+// For mp_vfs_proxy_call, the maximum number of additional args that can be passed.
+// A fixed maximum size is used to avoid the need for a costly variable array.
+#define PROXY_MAX_ARGS (2)
+
+// path is the path to lookup and *path_out holds the path within the VFS
+// object (starts with / if an absolute path).
+// Returns MP_VFS_ROOT for root dir (and then path_out is undefined) and
+// MP_VFS_NONE for path not found.
+mp_vfs_mount_t *mp_vfs_lookup_path(const char *path, const char **path_out) {
+    if (*path == '/' || MP_STATE_VM(vfs_cur) == MP_VFS_ROOT) {
+        // an absolute path, or the current volume is root, so search root dir
+        bool is_abs = 0;
+        if (*path == '/') {
+            ++path;
+            is_abs = 1;
+        }
+        if (*path == '\0') {
+            // path is "" or "/" so return virtual root
+            return MP_VFS_ROOT;
+        }
+        for (mp_vfs_mount_t *vfs = MP_STATE_VM(vfs_mount_table); vfs != NULL; vfs = vfs->next) {
+            size_t len = vfs->len - 1;
+            if (len == 0) {
+                *path_out = path - is_abs;
+                return vfs;
+            }
+            if (strncmp(path, vfs->str + 1, len) == 0) {
+                if (path[len] == '/') {
+                    *path_out = path + len;
+                    return vfs;
+                } else if (path[len] == '\0') {
+                    *path_out = "/";
+                    return vfs;
+                }
+            }
+        }
+
+        // if we get here then there's nothing mounted on /, so the path doesn't exist
+        return MP_VFS_NONE;
+    }
+
+    // a relative path within a mounted device
+    *path_out = path;
+    return MP_STATE_VM(vfs_cur);
+}
+
+// Version of mp_vfs_lookup_path that takes and returns uPy string objects.
+STATIC mp_vfs_mount_t *lookup_path(mp_obj_t path_in, mp_obj_t *path_out) {
+    const char *path = mp_obj_str_get_str(path_in);
+    const char *p_out;
+    mp_vfs_mount_t *vfs = mp_vfs_lookup_path(path, &p_out);
+    if (vfs != MP_VFS_NONE && vfs != MP_VFS_ROOT) {
+        *path_out = mp_obj_new_str_of_type(mp_obj_get_type(path_in),
+            (const byte *)p_out, strlen(p_out));
+    }
+    return vfs;
+}
+
+STATIC mp_obj_t mp_vfs_proxy_call(mp_vfs_mount_t *vfs, qstr meth_name, size_t n_args, const mp_obj_t *args) {
+    assert(n_args <= PROXY_MAX_ARGS);
+    if (vfs == MP_VFS_NONE) {
+        // mount point not found
+        mp_raise_OSError(MP_ENODEV);
+    }
+    if (vfs == MP_VFS_ROOT) {
+        // can't do operation on root dir
+        mp_raise_OSError(MP_EPERM);
+    }
+    mp_obj_t meth[2 + PROXY_MAX_ARGS];
+    mp_load_method(vfs->obj, meth_name, meth);
+    if (args != NULL) {
+        memcpy(meth + 2, args, n_args * sizeof(*args));
+    }
+    return mp_call_method_n_kw(n_args, 0, meth);
+}
+
+mp_import_stat_t mp_vfs_import_stat(const char *path) {
+    const char *path_out;
+    mp_vfs_mount_t *vfs = mp_vfs_lookup_path(path, &path_out);
+    if (vfs == MP_VFS_NONE || vfs == MP_VFS_ROOT) {
+        return MP_IMPORT_STAT_NO_EXIST;
+    }
+
+    // If the mounted object has the VFS protocol, call its import_stat helper
+    const mp_vfs_proto_t *proto = mp_obj_get_type(vfs->obj)->protocol;
+    if (proto != NULL) {
+        return proto->import_stat(MP_OBJ_TO_PTR(vfs->obj), path_out);
+    }
+
+    // delegate to vfs.stat() method
+    mp_obj_t path_o = mp_obj_new_str(path_out, strlen(path_out));
+    mp_obj_t stat;
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        stat = mp_vfs_proxy_call(vfs, MP_QSTR_stat, 1, &path_o);
+        nlr_pop();
+    } else {
+        // assume an exception means that the path is not found
+        return MP_IMPORT_STAT_NO_EXIST;
+    }
+    mp_obj_t *items;
+    mp_obj_get_array_fixed_n(stat, 10, &items);
+    mp_int_t st_mode = mp_obj_get_int(items[0]);
+    if (st_mode & MP_S_IFDIR) {
+        return MP_IMPORT_STAT_DIR;
+    } else {
+        return MP_IMPORT_STAT_FILE;
+    }
+}
+
+STATIC mp_obj_t mp_vfs_autodetect(mp_obj_t bdev_obj) {
+    #if MICROPY_VFS_LFS1 || MICROPY_VFS_LFS2
+    nlr_buf_t nlr;
+    if (nlr_push(&nlr) == 0) {
+        // The superblock for littlefs is in both block 0 and 1, but block 0 may be erased
+        // or partially written, so search both blocks 0 and 1 for the littlefs signature.
+        mp_vfs_blockdev_t blockdev;
+        mp_vfs_blockdev_init(&blockdev, bdev_obj);
+        uint8_t buf[44];
+        for (size_t block_num = 0; block_num <= 1; ++block_num) {
+            mp_vfs_blockdev_read_ext(&blockdev, block_num, 8, sizeof(buf), buf);
+            #if MICROPY_VFS_LFS1
+            if (memcmp(&buf[32], "littlefs", 8) == 0) {
+                // LFS1
+                mp_obj_t vfs = mp_type_vfs_lfs1.make_new(&mp_type_vfs_lfs1, 1, 0, &bdev_obj);
+                nlr_pop();
+                return vfs;
+            }
+            #endif
+            #if MICROPY_VFS_LFS2
+            if (memcmp(&buf[0], "littlefs", 8) == 0) {
+                // LFS2
+                mp_obj_t vfs = mp_type_vfs_lfs2.make_new(&mp_type_vfs_lfs2, 1, 0, &bdev_obj);
+                nlr_pop();
+                return vfs;
+            }
+            #endif
+        }
+        nlr_pop();
+    } else {
+        // Ignore exception (eg block device doesn't support extended readblocks)
+    }
+    #endif
+
+    #if MICROPY_VFS_FAT
+    return mp_fat_vfs_type.make_new(&mp_fat_vfs_type, 1, 0, &bdev_obj);
+    #endif
+
+    // no filesystem found
+    mp_raise_OSError(MP_ENODEV);
+}
+
+mp_obj_t mp_vfs_mount(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    enum { ARG_readonly, ARG_mkfs };
+    static const mp_arg_t allowed_args[] = {
+        { MP_QSTR_readonly, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_FALSE} },
+        { MP_QSTR_mkfs, MP_ARG_KW_ONLY | MP_ARG_OBJ, {.u_rom_obj = MP_ROM_FALSE} },
+    };
+    
+    // parse args
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all(n_args - 2, pos_args + 2, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+
+    // get the mount point
+    size_t mnt_len;
+    const char *mnt_str = mp_obj_str_get_data(pos_args[1], &mnt_len);
+
+    // see if we need to auto-detect and create the filesystem
+    mp_obj_t vfs_obj = pos_args[0];
+    mp_obj_t dest[2];
+    mp_load_method_maybe(vfs_obj, MP_QSTR_mount, dest);
+    if (dest[0] == MP_OBJ_NULL) {
+        // Input object has no mount method, assume it's a block device and try to
+        // auto-detect the filesystem and create the corresponding VFS entity.
+        vfs_obj = mp_vfs_autodetect(vfs_obj);
+    }
+
+    // create new object
+    mp_vfs_mount_t *vfs = m_new_obj(mp_vfs_mount_t);
+    vfs->str = mnt_str;
+    vfs->len = mnt_len;
+    vfs->obj = vfs_obj;
+    vfs->next = NULL;
+
+    // call the underlying object to do any mounting operation
+    mp_vfs_proxy_call(vfs, MP_QSTR_mount, 2, (mp_obj_t *)&args);
+
+    // check that the destination mount point is unused
+    const char *path_out;
+    mp_vfs_mount_t *existing_mount = mp_vfs_lookup_path(mp_obj_str_get_str(pos_args[1]), &path_out);
+    if (existing_mount != MP_VFS_NONE && existing_mount != MP_VFS_ROOT) {
+        if (vfs->len != 1 && existing_mount->len == 1) {
+            // if root dir is mounted, still allow to mount something within a subdir of root
+        } else {
+            // mount point in use
+            mp_raise_OSError(MP_EPERM);
+        }
+    }
+
+    // insert the vfs into the mount table
+    mp_vfs_mount_t **vfsp = &MP_STATE_VM(vfs_mount_table);
+    while (*vfsp != NULL) {
+        if ((*vfsp)->len == 1) {
+            // make sure anything mounted at the root stays at the end of the list
+            vfs->next = *vfsp;
+            break;
+        }
+        vfsp = &(*vfsp)->next;
+    }
+    *vfsp = vfs;
+
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_KW(mp_vfs_mount_obj, 2, mp_vfs_mount);
+
+mp_obj_t mp_vfs_umount(mp_obj_t mnt_in) {
+    // remove vfs from the mount table
+    mp_vfs_mount_t *vfs = NULL;
+    size_t mnt_len;
+    const char *mnt_str = NULL;
+    if (mp_obj_is_str(mnt_in)) {
+        mnt_str = mp_obj_str_get_data(mnt_in, &mnt_len);
+    }
+    for (mp_vfs_mount_t **vfsp = &MP_STATE_VM(vfs_mount_table); *vfsp != NULL; vfsp = &(*vfsp)->next) {
+        if ((mnt_str != NULL && !memcmp(mnt_str, (*vfsp)->str, mnt_len + 1)) || (*vfsp)->obj == mnt_in) {
+            vfs = *vfsp;
+            *vfsp = (*vfsp)->next;
+            break;
+        }
+    }
+
+    if (vfs == NULL) {
+        mp_raise_OSError(MP_EINVAL);
+    }
+
+    // if we unmounted the current device then set current to root
+    if (MP_STATE_VM(vfs_cur) == vfs) {
+        MP_STATE_VM(vfs_cur) = MP_VFS_ROOT;
+    }
+
+    // call the underlying object to do any unmounting operation
+    mp_vfs_proxy_call(vfs, MP_QSTR_umount, 0, NULL);
+
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_1(mp_vfs_umount_obj, mp_vfs_umount);
+
+// Note: buffering and encoding args are currently ignored
+mp_obj_t mp_vfs_open(size_t n_args, const mp_obj_t *pos_args, mp_map_t *kw_args) {
+    enum { ARG_file, ARG_mode, ARG_encoding };
+    static const mp_arg_t allowed_args[] = {
+        { MP_QSTR_file, MP_ARG_OBJ | MP_ARG_REQUIRED, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_mode, MP_ARG_OBJ, {.u_rom_obj = MP_ROM_QSTR(MP_QSTR_r)} },
+        { MP_QSTR_buffering, MP_ARG_INT, {.u_int = -1} },
+        { MP_QSTR_encoding, MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+    };
+
+    // parse args
+    mp_arg_val_t args[MP_ARRAY_SIZE(allowed_args)];
+    mp_arg_parse_all(n_args, pos_args, kw_args, MP_ARRAY_SIZE(allowed_args), allowed_args, args);
+
+    #if MICROPY_VFS_POSIX
+    // If the file is an integer then delegate straight to the POSIX handler
+    if (mp_obj_is_small_int(args[ARG_file].u_obj)) {
+        return mp_vfs_posix_file_open(&mp_type_textio, args[ARG_file].u_obj, args[ARG_mode].u_obj);
+    }
+    #endif
+
+    mp_vfs_mount_t *vfs = lookup_path(args[ARG_file].u_obj, &args[ARG_file].u_obj);
+    return mp_vfs_proxy_call(vfs, MP_QSTR_open, 2, (mp_obj_t *)&args);
+}
+MP_DEFINE_CONST_FUN_OBJ_KW(mp_vfs_open_obj, 0, mp_vfs_open);
+
+mp_obj_t mp_vfs_chdir(mp_obj_t path_in) {
+    mp_obj_t path_out;
+    mp_vfs_mount_t *vfs = lookup_path(path_in, &path_out);
+    if (vfs == MP_VFS_ROOT) {
+        // If we change to the root dir and a VFS is mounted at the root then
+        // we must change that VFS's current dir to the root dir so that any
+        // subsequent relative paths begin at the root of that VFS.
+        for (vfs = MP_STATE_VM(vfs_mount_table); vfs != NULL; vfs = vfs->next) {
+            if (vfs->len == 1) {
+                mp_obj_t root = MP_OBJ_NEW_QSTR(MP_QSTR__slash_);
+                mp_vfs_proxy_call(vfs, MP_QSTR_chdir, 1, &root);
+                break;
+            }
+        }
+        vfs = MP_VFS_ROOT;
+    } else {
+        mp_vfs_proxy_call(vfs, MP_QSTR_chdir, 1, &path_out);
+    }
+    MP_STATE_VM(vfs_cur) = vfs;
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_1(mp_vfs_chdir_obj, mp_vfs_chdir);
+
+mp_obj_t mp_vfs_getcwd(void) {
+    if (MP_STATE_VM(vfs_cur) == MP_VFS_ROOT) {
+        return MP_OBJ_NEW_QSTR(MP_QSTR__slash_);
+    }
+    mp_obj_t cwd_o = mp_vfs_proxy_call(MP_STATE_VM(vfs_cur), MP_QSTR_getcwd, 0, NULL);
+    if (MP_STATE_VM(vfs_cur)->len == 1) {
+        // don't prepend "/" for vfs mounted at root
+        return cwd_o;
+    }
+    const char *cwd = mp_obj_str_get_str(cwd_o);
+    vstr_t vstr;
+    vstr_init(&vstr, MP_STATE_VM(vfs_cur)->len + strlen(cwd) + 1);
+    vstr_add_strn(&vstr, MP_STATE_VM(vfs_cur)->str, MP_STATE_VM(vfs_cur)->len);
+    if (!(cwd[0] == '/' && cwd[1] == 0)) {
+        vstr_add_str(&vstr, cwd);
+    }
+    return mp_obj_new_str_from_vstr(&mp_type_str, &vstr);
+}
+MP_DEFINE_CONST_FUN_OBJ_0(mp_vfs_getcwd_obj, mp_vfs_getcwd);
+
+typedef struct _mp_vfs_ilistdir_it_t {
+    mp_obj_base_t base;
+    mp_fun_1_t iternext;
+    union {
+        mp_vfs_mount_t *vfs;
+        mp_obj_t iter;
+    } cur;
+    bool is_str;
+    bool is_iter;
+} mp_vfs_ilistdir_it_t;
+
+STATIC mp_obj_t mp_vfs_ilistdir_it_iternext(mp_obj_t self_in) {
+    mp_vfs_ilistdir_it_t *self = MP_OBJ_TO_PTR(self_in);
+    if (self->is_iter) {
+        // continue delegating to root dir
+        return mp_iternext(self->cur.iter);
+    } else if (self->cur.vfs == NULL) {
+        // finished iterating mount points and no root dir is mounted
+        return MP_OBJ_STOP_ITERATION;
+    } else {
+        // continue iterating mount points
+        mp_vfs_mount_t *vfs = self->cur.vfs;
+        self->cur.vfs = vfs->next;
+        if (vfs->len == 1) {
+            // vfs is mounted at root dir, delegate to it
+            mp_obj_t root = MP_OBJ_NEW_QSTR(MP_QSTR__slash_);
+            self->is_iter = true;
+            self->cur.iter = mp_vfs_proxy_call(vfs, MP_QSTR_ilistdir, 1, &root);
+            return mp_iternext(self->cur.iter);
+        } else {
+            // a mounted directory
+            mp_obj_tuple_t *t = MP_OBJ_TO_PTR(mp_obj_new_tuple(3, NULL));
+            t->items[0] = mp_obj_new_str_of_type(
+                self->is_str ? &mp_type_str : &mp_type_bytes,
+                (const byte *)vfs->str + 1, vfs->len - 1);
+            t->items[1] = MP_OBJ_NEW_SMALL_INT(MP_S_IFDIR);
+            t->items[2] = MP_OBJ_NEW_SMALL_INT(0); // no inode number
+            return MP_OBJ_FROM_PTR(t);
+        }
+    }
+}
+
+mp_obj_t mp_vfs_ilistdir(size_t n_args, const mp_obj_t *args) {
+    mp_obj_t path_in;
+    if (n_args == 1) {
+        path_in = args[0];
+    } else {
+        path_in = MP_OBJ_NEW_QSTR(MP_QSTR_);
+    }
+
+    mp_obj_t path_out;
+    mp_vfs_mount_t *vfs = lookup_path(path_in, &path_out);
+
+    if (vfs == MP_VFS_ROOT) {
+        // list the root directory
+        mp_vfs_ilistdir_it_t *iter = m_new_obj(mp_vfs_ilistdir_it_t);
+        iter->base.type = &mp_type_polymorph_iter;
+        iter->iternext = mp_vfs_ilistdir_it_iternext;
+        iter->cur.vfs = MP_STATE_VM(vfs_mount_table);
+        iter->is_str = mp_obj_get_type(path_in) == &mp_type_str;
+        iter->is_iter = false;
+        return MP_OBJ_FROM_PTR(iter);
+    }
+
+    return mp_vfs_proxy_call(vfs, MP_QSTR_ilistdir, 1, &path_out);
+}
+MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mp_vfs_ilistdir_obj, 0, 1, mp_vfs_ilistdir);
+
+mp_obj_t mp_vfs_listdir(size_t n_args, const mp_obj_t *args) {
+    mp_obj_t iter = mp_vfs_ilistdir(n_args, args);
+    mp_obj_t dir_list = mp_obj_new_list(0, NULL);
+    mp_obj_t next;
+    while ((next = mp_iternext(iter)) != MP_OBJ_STOP_ITERATION) {
+        mp_obj_list_append(dir_list, mp_obj_subscr(next, MP_OBJ_NEW_SMALL_INT(0), MP_OBJ_SENTINEL));
+    }
+    return dir_list;
+}
+MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(mp_vfs_listdir_obj, 0, 1, mp_vfs_listdir);
+
+mp_obj_t mp_vfs_mkdir(mp_obj_t path_in) {
+    mp_obj_t path_out;
+    mp_vfs_mount_t *vfs = lookup_path(path_in, &path_out);
+    if (vfs == MP_VFS_ROOT || (vfs != MP_VFS_NONE && !strcmp(mp_obj_str_get_str(path_out), "/"))) {
+        mp_raise_OSError(MP_EEXIST);
+    }
+    return mp_vfs_proxy_call(vfs, MP_QSTR_mkdir, 1, &path_out);
+}
+MP_DEFINE_CONST_FUN_OBJ_1(mp_vfs_mkdir_obj, mp_vfs_mkdir);
+
+mp_obj_t mp_vfs_remove(mp_obj_t path_in) {
+    mp_obj_t path_out;
+    mp_vfs_mount_t *vfs = lookup_path(path_in, &path_out);
+    return mp_vfs_proxy_call(vfs, MP_QSTR_remove, 1, &path_out);
+}
+MP_DEFINE_CONST_FUN_OBJ_1(mp_vfs_remove_obj, mp_vfs_remove);
+
+mp_obj_t mp_vfs_rename(mp_obj_t old_path_in, mp_obj_t new_path_in) {
+    mp_obj_t args[2];
+    mp_vfs_mount_t *old_vfs = lookup_path(old_path_in, &args[0]);
+    mp_vfs_mount_t *new_vfs = lookup_path(new_path_in, &args[1]);
+    if (old_vfs != new_vfs) {
+        // can't rename across filesystems
+        mp_raise_OSError(MP_EPERM);
+    }
+    return mp_vfs_proxy_call(old_vfs, MP_QSTR_rename, 2, args);
+}
+MP_DEFINE_CONST_FUN_OBJ_2(mp_vfs_rename_obj, mp_vfs_rename);
+
+mp_obj_t mp_vfs_rmdir(mp_obj_t path_in) {
+    mp_obj_t path_out;
+    mp_vfs_mount_t *vfs = lookup_path(path_in, &path_out);
+    return mp_vfs_proxy_call(vfs, MP_QSTR_rmdir, 1, &path_out);
+}
+MP_DEFINE_CONST_FUN_OBJ_1(mp_vfs_rmdir_obj, mp_vfs_rmdir);
+
+mp_obj_t mp_vfs_stat(mp_obj_t path_in) {
+    mp_obj_t path_out;
+    mp_vfs_mount_t *vfs = lookup_path(path_in, &path_out);
+    if (vfs == MP_VFS_ROOT) {
+        mp_obj_tuple_t *t = MP_OBJ_TO_PTR(mp_obj_new_tuple(10, NULL));
+        t->items[0] = MP_OBJ_NEW_SMALL_INT(MP_S_IFDIR); // st_mode
+        for (int i = 1; i <= 9; ++i) {
+            t->items[i] = MP_OBJ_NEW_SMALL_INT(0); // dev, nlink, uid, gid, size, atime, mtime, ctime
+        }
+        return MP_OBJ_FROM_PTR(t);
+    }
+    return mp_vfs_proxy_call(vfs, MP_QSTR_stat, 1, &path_out);
+}
+MP_DEFINE_CONST_FUN_OBJ_1(mp_vfs_stat_obj, mp_vfs_stat);
+
+mp_obj_t mp_vfs_statvfs(mp_obj_t path_in) {
+    mp_obj_t path_out;
+    mp_vfs_mount_t *vfs = lookup_path(path_in, &path_out);
+    if (vfs == MP_VFS_ROOT) {
+        // statvfs called on the root directory, see if there's anything mounted there
+        for (vfs = MP_STATE_VM(vfs_mount_table); vfs != NULL; vfs = vfs->next) {
+            if (vfs->len == 1) {
+                break;
+            }
+        }
+
+        // If there's nothing mounted at root then return a mostly-empty tuple
+        if (vfs == NULL) {
+            mp_obj_tuple_t *t = MP_OBJ_TO_PTR(mp_obj_new_tuple(10, NULL));
+
+            // fill in: bsize, frsize, blocks, bfree, bavail, files, ffree, favail, flags
+            for (int i = 0; i <= 8; ++i) {
+                t->items[i] = MP_OBJ_NEW_SMALL_INT(0);
+            }
+
+            // Put something sensible in f_namemax
+            t->items[9] = MP_OBJ_NEW_SMALL_INT(MICROPY_ALLOC_PATH_MAX);
+
+            return MP_OBJ_FROM_PTR(t);
+        }
+
+        // VFS mounted at root so delegate the call to it
+        path_out = MP_OBJ_NEW_QSTR(MP_QSTR__slash_);
+    }
+    return mp_vfs_proxy_call(vfs, MP_QSTR_statvfs, 1, &path_out);
+}
+MP_DEFINE_CONST_FUN_OBJ_1(mp_vfs_statvfs_obj, mp_vfs_statvfs);
+
+// This is a C-level helper function for ports to use if needed.
+int mp_vfs_mount_and_chdir_protected(mp_obj_t bdev, mp_obj_t mount_point) {
+    nlr_buf_t nlr;
+    mp_int_t ret = -MP_EIO;
+    if (nlr_push(&nlr) == 0) {
+        mp_obj_t args[] = { bdev, mount_point };
+        mp_vfs_mount(2, args, (mp_map_t *)&mp_const_empty_map);
+        mp_vfs_chdir(mount_point);
+        ret = 0; // success
+        nlr_pop();
+    } else {
+        mp_obj_base_t *exc = nlr.ret_val;
+        if (mp_obj_is_subclass_fast(MP_OBJ_FROM_PTR(exc->type), MP_OBJ_FROM_PTR(&mp_type_OSError))) {
+            mp_obj_t v = mp_obj_exception_get_value(MP_OBJ_FROM_PTR(exc));
+            mp_obj_get_int_maybe(v, &ret); // get errno value
+            ret = -ret;
+        }
+    }
+    return ret;
+}
+
+#endif // MICROPY_VFS
+
+// ------------------------------- extmod/vfs_blockdev.c ----------------------- //
+
+#include "py/runtime.h"
+#include "py/binary.h"
+#include "py/objarray.h"
+#include "py/mperrno.h"
+#include "extmod/vfs.h"
+
+#if MICROPY_VFS
+
+void mp_vfs_blockdev_init(mp_vfs_blockdev_t *self, mp_obj_t bdev) {
+    mp_load_method(bdev, MP_QSTR_readblocks, self->readblocks);
+    mp_load_method_maybe(bdev, MP_QSTR_writeblocks, self->writeblocks);
+    mp_load_method_maybe(bdev, MP_QSTR_ioctl, self->u.ioctl);
+    if (self->u.ioctl[0] != MP_OBJ_NULL) {
+        // Device supports new block protocol, so indicate it
+        self->flags |= MP_BLOCKDEV_FLAG_HAVE_IOCTL;
+    } else {
+        // No ioctl method, so assume the device uses the old block protocol
+        mp_load_method_maybe(bdev, MP_QSTR_sync, self->u.old.sync);
+        mp_load_method(bdev, MP_QSTR_count, self->u.old.count);
+    }
+}
+
+int mp_vfs_blockdev_read(mp_vfs_blockdev_t *self, size_t block_num, size_t num_blocks, uint8_t *buf) {
+    if (self->flags & MP_BLOCKDEV_FLAG_NATIVE) {
+        mp_uint_t (*f)(uint8_t *, uint32_t, uint32_t) = (void *)(uintptr_t)self->readblocks[2];
+        return f(buf, block_num, num_blocks);
+    } else {
+        mp_obj_array_t ar = {{&mp_type_bytearray}, BYTEARRAY_TYPECODE, 0, num_blocks *self->block_size, buf};
+        self->readblocks[2] = MP_OBJ_NEW_SMALL_INT(block_num);
+        self->readblocks[3] = MP_OBJ_FROM_PTR(&ar);
+        mp_call_method_n_kw(2, 0, self->readblocks);
+        // TODO handle error return
+        return 0;
+    }
+}
+
+int mp_vfs_blockdev_read_ext(mp_vfs_blockdev_t *self, size_t block_num, size_t block_off, size_t len, uint8_t *buf) {
+    mp_obj_array_t ar = {{&mp_type_bytearray}, BYTEARRAY_TYPECODE, 0, len, buf};
+    self->readblocks[2] = MP_OBJ_NEW_SMALL_INT(block_num);
+    self->readblocks[3] = MP_OBJ_FROM_PTR(&ar);
+    self->readblocks[4] = MP_OBJ_NEW_SMALL_INT(block_off);
+    mp_obj_t ret = mp_call_method_n_kw(3, 0, self->readblocks);
+    if (ret == mp_const_none) {
+        return 0;
+    } else {
+        return MP_OBJ_SMALL_INT_VALUE(ret);
+    }
+}
+
+int mp_vfs_blockdev_write(mp_vfs_blockdev_t *self, size_t block_num, size_t num_blocks, const uint8_t *buf) {
+    if (self->writeblocks[0] == MP_OBJ_NULL) {
+        // read-only block device
+        return -MP_EROFS;
+    }
+
+    if (self->flags & MP_BLOCKDEV_FLAG_NATIVE) {
+        mp_uint_t (*f)(const uint8_t *, uint32_t, uint32_t) = (void *)(uintptr_t)self->writeblocks[2];
+        return f(buf, block_num, num_blocks);
+    } else {
+        mp_obj_array_t ar = {{&mp_type_bytearray}, BYTEARRAY_TYPECODE, 0, num_blocks *self->block_size, (void *)buf};
+        self->writeblocks[2] = MP_OBJ_NEW_SMALL_INT(block_num);
+        self->writeblocks[3] = MP_OBJ_FROM_PTR(&ar);
+        mp_call_method_n_kw(2, 0, self->writeblocks);
+        // TODO handle error return
+        return 0;
+    }
+}
+
+int mp_vfs_blockdev_write_ext(mp_vfs_blockdev_t *self, size_t block_num, size_t block_off, size_t len, const uint8_t *buf) {
+    if (self->writeblocks[0] == MP_OBJ_NULL) {
+        // read-only block device
+        return -MP_EROFS;
+    }
+
+    mp_obj_array_t ar = {{&mp_type_bytearray}, BYTEARRAY_TYPECODE, 0, len, (void *)buf};
+    self->writeblocks[2] = MP_OBJ_NEW_SMALL_INT(block_num);
+    self->writeblocks[3] = MP_OBJ_FROM_PTR(&ar);
+    self->writeblocks[4] = MP_OBJ_NEW_SMALL_INT(block_off);
+    mp_obj_t ret = mp_call_method_n_kw(3, 0, self->writeblocks);
+    if (ret == mp_const_none) {
+        return 0;
+    } else {
+        return MP_OBJ_SMALL_INT_VALUE(ret);
+    }
+}
+
+mp_obj_t mp_vfs_blockdev_ioctl(mp_vfs_blockdev_t *self, uintptr_t cmd, uintptr_t arg) {
+    if (self->flags & MP_BLOCKDEV_FLAG_HAVE_IOCTL) {
+        // New protocol with ioctl
+        self->u.ioctl[2] = MP_OBJ_NEW_SMALL_INT(cmd);
+        self->u.ioctl[3] = MP_OBJ_NEW_SMALL_INT(arg);
+        return mp_call_method_n_kw(2, 0, self->u.ioctl);
+    } else {
+        // Old protocol with sync and count
+        switch (cmd) {
+            case MP_BLOCKDEV_IOCTL_SYNC:
+                if (self->u.old.sync[0] != MP_OBJ_NULL) {
+                    mp_call_method_n_kw(0, 0, self->u.old.sync);
+                }
+                break;
+
+            case MP_BLOCKDEV_IOCTL_BLOCK_COUNT:
+                return mp_call_method_n_kw(0, 0, self->u.old.count);
+
+            case MP_BLOCKDEV_IOCTL_BLOCK_SIZE:
+                // Old protocol has fixed sector size of 512 bytes
+                break;
+
+            case MP_BLOCKDEV_IOCTL_INIT:
+                // Old protocol doesn't have init
+                break;
+        }
+        return mp_const_none;
+    }
+}
+
+#endif // MICROPY_VFS
+
+
+// ------------------ extmod/vfs_lfs.c -------------------------- //
+
+#include "py/runtime.h"
+#include "py/mphal.h"
+#include "shared/timeutils/timeutils.h"
+#include "extmod/vfs.h"
+#include "extmod/vfs_lfs.h"
+
+#if MICROPY_VFS && (MICROPY_VFS_LFS1 || MICROPY_VFS_LFS2)
+
+enum { LFS_MAKE_ARG_bdev, LFS_MAKE_ARG_readsize, LFS_MAKE_ARG_progsize, LFS_MAKE_ARG_lookahead, LFS_MAKE_ARG_mtime };
+
+static const mp_arg_t lfs_make_allowed_args[] = {
+    { MP_QSTR_, MP_ARG_REQUIRED | MP_ARG_OBJ, {.u_obj = MP_OBJ_NULL} },
+    { MP_QSTR_readsize, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 32} },
+    { MP_QSTR_progsize, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 32} },
+    { MP_QSTR_lookahead, MP_ARG_KW_ONLY | MP_ARG_INT, {.u_int = 32} },
+    { MP_QSTR_mtime, MP_ARG_KW_ONLY | MP_ARG_BOOL, {.u_bool = true} },
+};
+
+#if MICROPY_VFS_LFS1
+
+#include "lib/littlefs/lfs1.h"
+
+#define LFS_BUILD_VERSION (1)
+#define LFSx_MACRO(s) LFS1##s
+#define LFSx_API(s) lfs1_##s
+#define MP_VFS_LFSx(s) mp_vfs_lfs1_##s
+#define MP_OBJ_VFS_LFSx mp_obj_vfs_lfs1_t
+#define MP_OBJ_VFS_LFSx_FILE mp_obj_vfs_lfs1_file_t
+#define MP_TYPE_VFS_LFSx mp_type_vfs_lfs1
+#define MP_TYPE_VFS_LFSx_(s) mp_type_vfs_lfs1##s
+
+typedef struct _mp_obj_vfs_lfs1_t {
+    mp_obj_base_t base;
+    mp_vfs_blockdev_t blockdev;
+    vstr_t cur_dir;
+    struct lfs1_config config;
+    lfs1_t lfs;
+} mp_obj_vfs_lfs1_t;
+
+typedef struct _mp_obj_vfs_lfs1_file_t {
+    mp_obj_base_t base;
+    mp_obj_vfs_lfs1_t *vfs;
+    lfs1_file_t file;
+    struct lfs1_file_config cfg;
+    uint8_t file_buffer[0];
+} mp_obj_vfs_lfs1_file_t;
+
+const char *mp_vfs_lfs1_make_path(mp_obj_vfs_lfs1_t *self, mp_obj_t path_in);
+mp_obj_t mp_vfs_lfs1_file_open(mp_obj_t self_in, mp_obj_t path_in, mp_obj_t mode_in);
+
+#include "extmod/vfs_lfsx.c"
+#include "extmod/vfs_lfsx_file.c"
+
+#undef LFS_BUILD_VERSION
+#undef LFSx_MACRO
+#undef LFSx_API
+#undef MP_VFS_LFSx
+#undef MP_OBJ_VFS_LFSx
+#undef MP_OBJ_VFS_LFSx_FILE
+#undef MP_TYPE_VFS_LFSx
+#undef MP_TYPE_VFS_LFSx_
+
+#endif // MICROPY_VFS_LFS1
+
+#if MICROPY_VFS_LFS2
+
+#include "lib/littlefs/lfs2.h"
+
+#define LFS_BUILD_VERSION (2)
+#define LFSx_MACRO(s) LFS2##s
+#define LFSx_API(s) lfs2_##s
+#define MP_VFS_LFSx(s) mp_vfs_lfs2_##s
+#define MP_OBJ_VFS_LFSx mp_obj_vfs_lfs2_t
+#define MP_OBJ_VFS_LFSx_FILE mp_obj_vfs_lfs2_file_t
+#define MP_TYPE_VFS_LFSx mp_type_vfs_lfs2
+#define MP_TYPE_VFS_LFSx_(s) mp_type_vfs_lfs2##s
+
+// Attribute ids for lfs2_attr.type.
+#define LFS_ATTR_MTIME (1) // 64-bit little endian, nanoseconds since 1970/1/1
+
+typedef struct _mp_obj_vfs_lfs2_t {
+    mp_obj_base_t base;
+    mp_vfs_blockdev_t blockdev;
+    bool enable_mtime;
+    vstr_t cur_dir;
+    struct lfs2_config config;
+    lfs2_t lfs;
+} mp_obj_vfs_lfs2_t;
+
+typedef struct _mp_obj_vfs_lfs2_file_t {
+    mp_obj_base_t base;
+    mp_obj_vfs_lfs2_t *vfs;
+    uint8_t mtime[8];
+    lfs2_file_t file;
+    struct lfs2_file_config cfg;
+    struct lfs2_attr attrs[1];
+    uint8_t file_buffer[0];
+} mp_obj_vfs_lfs2_file_t;
+
+const char *mp_vfs_lfs2_make_path(mp_obj_vfs_lfs2_t *self, mp_obj_t path_in);
+mp_obj_t mp_vfs_lfs2_file_open(mp_obj_t self_in, mp_obj_t path_in, mp_obj_t mode_in);
+
+STATIC void lfs_get_mtime(uint8_t buf[8]) {
+    // On-disk storage of timestamps uses 1970 as the Epoch, so convert from host's Epoch.
+    uint64_t ns = timeutils_nanoseconds_since_epoch_to_nanoseconds_since_1970(mp_hal_time_ns());
+    // Store "ns" to "buf" in little-endian format (essentially htole64).
+    for (size_t i = 0; i < 8; ++i) {
+        buf[i] = ns;
+        ns >>= 8;
+    }
+}
+
+#include "extmod/vfs_lfsx.c"
+#include "extmod/vfs_lfsx_file.c"
+
+#endif // MICROPY_VFS_LFS2
+
+#endif // MICROPY_VFS && (MICROPY_VFS_LFS1 || MICROPY_VFS_LFS2)
+
+// ------------------- lib/lfs2.c --------------------- //
+
+
+#define LFS2_BLOCK_NULL ((lfs2_block_t)-1)
+#define LFS2_BLOCK_INLINE ((lfs2_block_t)-2)
+
+/// Caching block device operations ///
+static inline void lfs2_cache_drop(lfs2_t *lfs2, lfs2_cache_t *rcache) {
+    // do not zero, cheaper if cache is readonly or only going to be
+    // written with identical data (during relocates)
+    (void)lfs2;
+    rcache->block = LFS2_BLOCK_NULL;
+}
+
+static inline void lfs2_cache_zero(lfs2_t *lfs2, lfs2_cache_t *pcache) {
+    // zero to avoid information leak
+    memset(pcache->buffer, 0xff, lfs2->cfg->cache_size);
+    pcache->block = LFS2_BLOCK_NULL;
+}
+
+static int lfs2_bd_read(lfs2_t *lfs2,
+        const lfs2_cache_t *pcache, lfs2_cache_t *rcache, lfs2_size_t hint,
+        lfs2_block_t block, lfs2_off_t off,
+        void *buffer, lfs2_size_t size) {
+    uint8_t *data = buffer;
+    if (block >= lfs2->cfg->block_count ||
+            off+size > lfs2->cfg->block_size) {
+        return LFS2_ERR_CORRUPT;
+    }
+
+    while (size > 0) {
+        lfs2_size_t diff = size;
+
+        if (pcache && block == pcache->block &&
+                off < pcache->off + pcache->size) {
+            if (off >= pcache->off) {
+                // is already in pcache?
+                diff = lfs2_min(diff, pcache->size - (off-pcache->off));
+                memcpy(data, &pcache->buffer[off-pcache->off], diff);
+
+                data += diff;
+                off += diff;
+                size -= diff;
+                continue;
+            }
+
+            // pcache takes priority
+            diff = lfs2_min(diff, pcache->off-off);
+        }
+
+        if (block == rcache->block &&
+                off < rcache->off + rcache->size) {
+            if (off >= rcache->off) {
+                // is already in rcache?
+                diff = lfs2_min(diff, rcache->size - (off-rcache->off));
+                memcpy(data, &rcache->buffer[off-rcache->off], diff);
+
+                data += diff;
+                off += diff;
+                size -= diff;
+                continue;
+            }
+
+            // rcache takes priority
+            diff = lfs2_min(diff, rcache->off-off);
+        }
+
+        if (size >= hint && off % lfs2->cfg->read_size == 0 &&
+                size >= lfs2->cfg->read_size) {
+            // bypass cache?
+            diff = lfs2_aligndown(diff, lfs2->cfg->read_size);
+            int err = lfs2->cfg->read(lfs2->cfg, block, off, data, diff);
+            if (err) {
+                return err;
+            }
+
+            data += diff;
+            off += diff;
+            size -= diff;
+            continue;
+        }
+
+        // load to cache, first condition can no longer fail
+        LFS2_ASSERT(block < lfs2->cfg->block_count);
+        rcache->block = block;
+        rcache->off = lfs2_aligndown(off, lfs2->cfg->read_size);
+        rcache->size = lfs2_min(
+                lfs2_min(
+                    lfs2_alignup(off+hint, lfs2->cfg->read_size),
+                    lfs2->cfg->block_size)
+                - rcache->off,
+                lfs2->cfg->cache_size);
+        int err = lfs2->cfg->read(lfs2->cfg, rcache->block,
+                rcache->off, rcache->buffer, rcache->size);
+        LFS2_ASSERT(err <= 0);
+        if (err) {
+            return err;
+        }
+    }
+
+    return 0;
+}
+
+enum {
+    LFS2_CMP_EQ = 0,
+    LFS2_CMP_LT = 1,
+    LFS2_CMP_GT = 2,
+};
+
+static int lfs2_bd_cmp(lfs2_t *lfs2,
+        const lfs2_cache_t *pcache, lfs2_cache_t *rcache, lfs2_size_t hint,
+        lfs2_block_t block, lfs2_off_t off,
+        const void *buffer, lfs2_size_t size) {
+    const uint8_t *data = buffer;
+    lfs2_size_t diff = 0;
+
+    for (lfs2_off_t i = 0; i < size; i += diff) {
+        uint8_t dat[8];
+
+        diff = lfs2_min(size-i, sizeof(dat));
+        int res = lfs2_bd_read(lfs2,
+                pcache, rcache, hint-i,
+                block, off+i, &dat, diff);
+        if (res) {
+            return res;
+        }
+
+        res = memcmp(dat, data + i, diff);
+        if (res) {
+            return res < 0 ? LFS2_CMP_LT : LFS2_CMP_GT;
+        }
+    }
+
+    return LFS2_CMP_EQ;
+}
+
+#ifndef LFS2_READONLY
+static int lfs2_bd_flush(lfs2_t *lfs2,
+        lfs2_cache_t *pcache, lfs2_cache_t *rcache, bool validate) {
+    if (pcache->block != LFS2_BLOCK_NULL && pcache->block != LFS2_BLOCK_INLINE) {
+        LFS2_ASSERT(pcache->block < lfs2->cfg->block_count);
+        lfs2_size_t diff = lfs2_alignup(pcache->size, lfs2->cfg->prog_size);
+        int err = lfs2->cfg->prog(lfs2->cfg, pcache->block,
+                pcache->off, pcache->buffer, diff);
+        LFS2_ASSERT(err <= 0);
+        if (err) {
+            return err;
+        }
+
+        if (validate) {
+            // check data on disk
+            lfs2_cache_drop(lfs2, rcache);
+            int res = lfs2_bd_cmp(lfs2,
+                    NULL, rcache, diff,
+                    pcache->block, pcache->off, pcache->buffer, diff);
+            if (res < 0) {
+                return res;
+            }
+
+            if (res != LFS2_CMP_EQ) {
+                return LFS2_ERR_CORRUPT;
+            }
+        }
+
+        lfs2_cache_zero(lfs2, pcache);
+    }
+
+    return 0;
+}
+#endif
+
+#ifndef LFS2_READONLY
+static int lfs2_bd_sync(lfs2_t *lfs2,
+        lfs2_cache_t *pcache, lfs2_cache_t *rcache, bool validate) {
+    lfs2_cache_drop(lfs2, rcache);
+
+    int err = lfs2_bd_flush(lfs2, pcache, rcache, validate);
+    if (err) {
+        return err;
+    }
+
+    err = lfs2->cfg->sync(lfs2->cfg);
+    LFS2_ASSERT(err <= 0);
+    return err;
+}
+#endif
+
+#ifndef LFS2_READONLY
+static int lfs2_bd_prog(lfs2_t *lfs2,
+        lfs2_cache_t *pcache, lfs2_cache_t *rcache, bool validate,
+        lfs2_block_t block, lfs2_off_t off,
+        const void *buffer, lfs2_size_t size) {
+    const uint8_t *data = buffer;
+    LFS2_ASSERT(block == LFS2_BLOCK_INLINE || block < lfs2->cfg->block_count);
+    LFS2_ASSERT(off + size <= lfs2->cfg->block_size);
+
+    while (size > 0) {
+        if (block == pcache->block &&
+                off >= pcache->off &&
+                off < pcache->off + lfs2->cfg->cache_size) {
+            // already fits in pcache?
+            lfs2_size_t diff = lfs2_min(size,
+                    lfs2->cfg->cache_size - (off-pcache->off));
+            memcpy(&pcache->buffer[off-pcache->off], data, diff);
+
+            data += diff;
+            off += diff;
+            size -= diff;
+
+            pcache->size = lfs2_max(pcache->size, off - pcache->off);
+            if (pcache->size == lfs2->cfg->cache_size) {
+                // eagerly flush out pcache if we fill up
+                int err = lfs2_bd_flush(lfs2, pcache, rcache, validate);
+                if (err) {
+                    return err;
+                }
+            }
+
+            continue;
+        }
+
+        // pcache must have been flushed, either by programming and
+        // entire block or manually flushing the pcache
+        LFS2_ASSERT(pcache->block == LFS2_BLOCK_NULL);
+
+        // prepare pcache, first condition can no longer fail
+        pcache->block = block;
+        pcache->off = lfs2_aligndown(off, lfs2->cfg->prog_size);
+        pcache->size = 0;
+    }
+
+    return 0;
+}
+#endif
+
+#ifndef LFS2_READONLY
+static int lfs2_bd_erase(lfs2_t *lfs2, lfs2_block_t block) {
+    LFS2_ASSERT(block < lfs2->cfg->block_count);
+    int err = lfs2->cfg->erase(lfs2->cfg, block);
+    LFS2_ASSERT(err <= 0);
+    return err;
+}
+#endif
+
+
+/// Small type-level utilities ///
+// operations on block pairs
+static inline void lfs2_pair_swap(lfs2_block_t pair[2]) {
+    lfs2_block_t t = pair[0];
+    pair[0] = pair[1];
+    pair[1] = t;
+}
+
+static inline bool lfs2_pair_isnull(const lfs2_block_t pair[2]) {
+    return pair[0] == LFS2_BLOCK_NULL || pair[1] == LFS2_BLOCK_NULL;
+}
+
+static inline int lfs2_pair_cmp(
+        const lfs2_block_t paira[2],
+        const lfs2_block_t pairb[2]) {
+    return !(paira[0] == pairb[0] || paira[1] == pairb[1] ||
+             paira[0] == pairb[1] || paira[1] == pairb[0]);
+}
+
+static inline bool lfs2_pair_sync(
+        const lfs2_block_t paira[2],
+        const lfs2_block_t pairb[2]) {
+    return (paira[0] == pairb[0] && paira[1] == pairb[1]) ||
+           (paira[0] == pairb[1] && paira[1] == pairb[0]);
+}
+
+static inline void lfs2_pair_fromle32(lfs2_block_t pair[2]) {
+    pair[0] = lfs2_fromle32(pair[0]);
+    pair[1] = lfs2_fromle32(pair[1]);
+}
+
+static inline void lfs2_pair_tole32(lfs2_block_t pair[2]) {
+    pair[0] = lfs2_tole32(pair[0]);
+    pair[1] = lfs2_tole32(pair[1]);
+}
+
+// operations on 32-bit entry tags
+typedef uint32_t lfs2_tag_t;
+typedef int32_t lfs2_stag_t;
+
+#define LFS2_MKTAG(type, id, size) \
+    (((lfs2_tag_t)(type) << 20) | ((lfs2_tag_t)(id) << 10) | (lfs2_tag_t)(size))
+
+#define LFS2_MKTAG_IF(cond, type, id, size) \
+    ((cond) ? LFS2_MKTAG(type, id, size) : LFS2_MKTAG(LFS2_FROM_NOOP, 0, 0))
+
+#define LFS2_MKTAG_IF_ELSE(cond, type1, id1, size1, type2, id2, size2) \
+    ((cond) ? LFS2_MKTAG(type1, id1, size1) : LFS2_MKTAG(type2, id2, size2))
+
+static inline bool lfs2_tag_isvalid(lfs2_tag_t tag) {
+    return !(tag & 0x80000000);
+}
+
+static inline bool lfs2_tag_isdelete(lfs2_tag_t tag) {
+    return ((int32_t)(tag << 22) >> 22) == -1;
+}
+
+static inline uint16_t lfs2_tag_type1(lfs2_tag_t tag) {
+    return (tag & 0x70000000) >> 20;
+}
+
+static inline uint16_t lfs2_tag_type3(lfs2_tag_t tag) {
+    return (tag & 0x7ff00000) >> 20;
+}
+
+static inline uint8_t lfs2_tag_chunk(lfs2_tag_t tag) {
+    return (tag & 0x0ff00000) >> 20;
+}
+
+static inline int8_t lfs2_tag_splice(lfs2_tag_t tag) {
+    return (int8_t)lfs2_tag_chunk(tag);
+}
+
+static inline uint16_t lfs2_tag_id(lfs2_tag_t tag) {
+    return (tag & 0x000ffc00) >> 10;
+}
+
+static inline lfs2_size_t lfs2_tag_size(lfs2_tag_t tag) {
+    return tag & 0x000003ff;
+}
+
+static inline lfs2_size_t lfs2_tag_dsize(lfs2_tag_t tag) {
+    return sizeof(tag) + lfs2_tag_size(tag + lfs2_tag_isdelete(tag));
+}
+
+// operations on attributes in attribute lists
+struct lfs2_mattr {
+    lfs2_tag_t tag;
+    const void *buffer;
+};
+
+struct lfs2_diskoff {
+    lfs2_block_t block;
+    lfs2_off_t off;
+};
+
+#define LFS2_MKATTRS(...) \
+    (struct lfs2_mattr[]){__VA_ARGS__}, \
+    sizeof((struct lfs2_mattr[]){__VA_ARGS__}) / sizeof(struct lfs2_mattr)
+
+// operations on global state
+static inline void lfs2_gstate_xor(lfs2_gstate_t *a, const lfs2_gstate_t *b) {
+    for (int i = 0; i < 3; i++) {
+        ((uint32_t*)a)[i] ^= ((const uint32_t*)b)[i];
+    }
+}
+
+static inline bool lfs2_gstate_iszero(const lfs2_gstate_t *a) {
+    for (int i = 0; i < 3; i++) {
+        if (((uint32_t*)a)[i] != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static inline bool lfs2_gstate_hasorphans(const lfs2_gstate_t *a) {
+    return lfs2_tag_size(a->tag);
+}
+
+static inline uint8_t lfs2_gstate_getorphans(const lfs2_gstate_t *a) {
+    return lfs2_tag_size(a->tag);
+}
+
+static inline bool lfs2_gstate_hasmove(const lfs2_gstate_t *a) {
+    return lfs2_tag_type1(a->tag);
+}
+
+static inline bool lfs2_gstate_hasmovehere(const lfs2_gstate_t *a,
+        const lfs2_block_t *pair) {
+    return lfs2_tag_type1(a->tag) && lfs2_pair_cmp(a->pair, pair) == 0;
+}
+
+static inline void lfs2_gstate_fromle32(lfs2_gstate_t *a) {
+    a->tag     = lfs2_fromle32(a->tag);
+    a->pair[0] = lfs2_fromle32(a->pair[0]);
+    a->pair[1] = lfs2_fromle32(a->pair[1]);
+}
+
+static inline void lfs2_gstate_tole32(lfs2_gstate_t *a) {
+    a->tag     = lfs2_tole32(a->tag);
+    a->pair[0] = lfs2_tole32(a->pair[0]);
+    a->pair[1] = lfs2_tole32(a->pair[1]);
+}
+
+// other endianness operations
+static void lfs2_ctz_fromle32(struct lfs2_ctz *ctz) {
+    ctz->head = lfs2_fromle32(ctz->head);
+    ctz->size = lfs2_fromle32(ctz->size);
+}
+
+#ifndef LFS2_READONLY
+static void lfs2_ctz_tole32(struct lfs2_ctz *ctz) {
+    ctz->head = lfs2_tole32(ctz->head);
+    ctz->size = lfs2_tole32(ctz->size);
+}
+#endif
+
+static inline void lfs2_superblock_fromle32(lfs2_superblock_t *superblock) {
+    superblock->version     = lfs2_fromle32(superblock->version);
+    superblock->block_size  = lfs2_fromle32(superblock->block_size);
+    superblock->block_count = lfs2_fromle32(superblock->block_count);
+    superblock->name_max    = lfs2_fromle32(superblock->name_max);
+    superblock->file_max    = lfs2_fromle32(superblock->file_max);
+    superblock->attr_max    = lfs2_fromle32(superblock->attr_max);
+}
+
+static inline void lfs2_superblock_tole32(lfs2_superblock_t *superblock) {
+    superblock->version     = lfs2_tole32(superblock->version);
+    superblock->block_size  = lfs2_tole32(superblock->block_size);
+    superblock->block_count = lfs2_tole32(superblock->block_count);
+    superblock->name_max    = lfs2_tole32(superblock->name_max);
+    superblock->file_max    = lfs2_tole32(superblock->file_max);
+    superblock->attr_max    = lfs2_tole32(superblock->attr_max);
+}
+
+#ifndef LFS2_NO_ASSERT
+static inline bool lfs2_mlist_isopen(struct lfs2_mlist *head,
+        struct lfs2_mlist *node) {
+    for (struct lfs2_mlist **p = &head; *p; p = &(*p)->next) {
+        if (*p == (struct lfs2_mlist*)node) {
+            return true;
+        }
+    }
+
+    return false;
+}
+#endif
+
+static inline void lfs2_mlist_remove(lfs2_t *lfs2, struct lfs2_mlist *mlist) {
+    for (struct lfs2_mlist **p = &lfs2->mlist; *p; p = &(*p)->next) {
+        if (*p == mlist) {
+            *p = (*p)->next;
+            break;
+        }
+    }
+}
+
+static inline void lfs2_mlist_append(lfs2_t *lfs2, struct lfs2_mlist *mlist) {
+    mlist->next = lfs2->mlist;
+    lfs2->mlist = mlist;
+}
+
+
+/// Internal operations predeclared here ///
+#ifndef LFS2_READONLY
+static int lfs2_dir_commit(lfs2_t *lfs2, lfs2_mdir_t *dir,
+        const struct lfs2_mattr *attrs, int attrcount);
+static int lfs2_dir_compact(lfs2_t *lfs2,
+        lfs2_mdir_t *dir, const struct lfs2_mattr *attrs, int attrcount,
+        lfs2_mdir_t *source, uint16_t begin, uint16_t end);
+
+static lfs2_ssize_t lfs2_file_rawwrite(lfs2_t *lfs2, lfs2_file_t *file,
+        const void *buffer, lfs2_size_t size);
+static int lfs2_file_rawsync(lfs2_t *lfs2, lfs2_file_t *file);
+static int lfs2_file_outline(lfs2_t *lfs2, lfs2_file_t *file);
+static int lfs2_file_flush(lfs2_t *lfs2, lfs2_file_t *file);
+
+static void lfs2_fs_preporphans(lfs2_t *lfs2, int8_t orphans);
+static void lfs2_fs_prepmove(lfs2_t *lfs2,
+        uint16_t id, const lfs2_block_t pair[2]);
+static int lfs2_fs_pred(lfs2_t *lfs2, const lfs2_block_t dir[2],
+        lfs2_mdir_t *pdir);
+static lfs2_stag_t lfs2_fs_parent(lfs2_t *lfs2, const lfs2_block_t dir[2],
+        lfs2_mdir_t *parent);
+static int lfs2_fs_relocate(lfs2_t *lfs2,
+        const lfs2_block_t oldpair[2], lfs2_block_t newpair[2]);
+static int lfs2_fs_forceconsistency(lfs2_t *lfs2);
+#endif
+
+#ifdef LFS2_MIGRATE
+static int lfs21_traverse(lfs2_t *lfs2,
+        int (*cb)(void*, lfs2_block_t), void *data);
+#endif
+
+static int lfs2_dir_rawrewind(lfs2_t *lfs2, lfs2_dir_t *dir);
+
+static lfs2_ssize_t lfs2_file_rawread(lfs2_t *lfs2, lfs2_file_t *file,
+        void *buffer, lfs2_size_t size);
+static int lfs2_file_rawclose(lfs2_t *lfs2, lfs2_file_t *file);
+static lfs2_soff_t lfs2_file_rawsize(lfs2_t *lfs2, lfs2_file_t *file);
+
+static lfs2_ssize_t lfs2_fs_rawsize(lfs2_t *lfs2);
+static int lfs2_fs_rawtraverse(lfs2_t *lfs2,
+        int (*cb)(void *data, lfs2_block_t block), void *data,
+        bool includeorphans);
+
+static int lfs2_deinit(lfs2_t *lfs2);
+static int lfs2_rawunmount(lfs2_t *lfs2);
+
+
+/// Block allocator ///
+#ifndef LFS2_READONLY
+static int lfs2_alloc_lookahead(void *p, lfs2_block_t block) {
+    lfs2_t *lfs2 = (lfs2_t*)p;
+    lfs2_block_t off = ((block - lfs2->free.off)
+            + lfs2->cfg->block_count) % lfs2->cfg->block_count;
+
+    if (off < lfs2->free.size) {
+        lfs2->free.buffer[off / 32] |= 1U << (off % 32);
+    }
+
+    return 0;
+}
+#endif
+
+// indicate allocated blocks have been committed into the filesystem, this
+// is to prevent blocks from being garbage collected in the middle of a
+// commit operation
+static void lfs2_alloc_ack(lfs2_t *lfs2) {
+    lfs2->free.ack = lfs2->cfg->block_count;
+}
+
+// drop the lookahead buffer, this is done during mounting and failed
+// traversals in order to avoid invalid lookahead state
+static void lfs2_alloc_drop(lfs2_t *lfs2) {
+    lfs2->free.size = 0;
+    lfs2->free.i = 0;
+    lfs2_alloc_ack(lfs2);
+}
+
+#ifndef LFS2_READONLY
+static int lfs2_alloc(lfs2_t *lfs2, lfs2_block_t *block) {
+    while (true) {
+        while (lfs2->free.i != lfs2->free.size) {
+            lfs2_block_t off = lfs2->free.i;
+            lfs2->free.i += 1;
+            lfs2->free.ack -= 1;
+
+            if (!(lfs2->free.buffer[off / 32] & (1U << (off % 32)))) {
+                // found a free block
+                *block = (lfs2->free.off + off) % lfs2->cfg->block_count;
+
+                // eagerly find next off so an alloc ack can
+                // discredit old lookahead blocks
+                while (lfs2->free.i != lfs2->free.size &&
+                        (lfs2->free.buffer[lfs2->free.i / 32]
+                            & (1U << (lfs2->free.i % 32)))) {
+                    lfs2->free.i += 1;
+                    lfs2->free.ack -= 1;
+                }
+
+                return 0;
+            }
+        }
+
+        // check if we have looked at all blocks since last ack
+        if (lfs2->free.ack == 0) {
+            LFS2_ERROR("No more free space %"PRIu32,
+                    lfs2->free.i + lfs2->free.off);
+            return LFS2_ERR_NOSPC;
+        }
+
+        lfs2->free.off = (lfs2->free.off + lfs2->free.size)
+                % lfs2->cfg->block_count;
+        lfs2->free.size = lfs2_min(8*lfs2->cfg->lookahead_size, lfs2->free.ack);
+        lfs2->free.i = 0;
+
+        // find mask of free blocks from tree
+        memset(lfs2->free.buffer, 0, lfs2->cfg->lookahead_size);
+        int err = lfs2_fs_rawtraverse(lfs2, lfs2_alloc_lookahead, lfs2, true);
+        if (err) {
+            lfs2_alloc_drop(lfs2);
+            return err;
+        }
+    }
+}
+#endif
+
+/// Metadata pair and directory operations ///
+static lfs2_stag_t lfs2_dir_getslice(lfs2_t *lfs2, const lfs2_mdir_t *dir,
+        lfs2_tag_t gmask, lfs2_tag_t gtag,
+        lfs2_off_t goff, void *gbuffer, lfs2_size_t gsize) {
+    lfs2_off_t off = dir->off;
+    lfs2_tag_t ntag = dir->etag;
+    lfs2_stag_t gdiff = 0;
+
+    if (lfs2_gstate_hasmovehere(&lfs2->gdisk, dir->pair) &&
+            lfs2_tag_id(gmask) != 0 &&
+            lfs2_tag_id(lfs2->gdisk.tag) <= lfs2_tag_id(gtag)) {
+        // synthetic moves
+        gdiff -= LFS2_MKTAG(0, 1, 0);
+    }
+
+    // iterate over dir block backwards (for faster lookups)
+    while (off >= sizeof(lfs2_tag_t) + lfs2_tag_dsize(ntag)) {
+        off -= lfs2_tag_dsize(ntag);
+        lfs2_tag_t tag = ntag;
+        int err = lfs2_bd_read(lfs2,
+                NULL, &lfs2->rcache, sizeof(ntag),
+                dir->pair[0], off, &ntag, sizeof(ntag));
+        if (err) {
+            return err;
+        }
+
+        ntag = (lfs2_frombe32(ntag) ^ tag) & 0x7fffffff;
+
+        if (lfs2_tag_id(gmask) != 0 &&
+                lfs2_tag_type1(tag) == LFS2_TYPE_SPLICE &&
+                lfs2_tag_id(tag) <= lfs2_tag_id(gtag - gdiff)) {
+            if (tag == (LFS2_MKTAG(LFS2_TYPE_CREATE, 0, 0) |
+                    (LFS2_MKTAG(0, 0x3ff, 0) & (gtag - gdiff)))) {
+                // found where we were created
+                return LFS2_ERR_NOENT;
+            }
+
+            // move around splices
+            gdiff += LFS2_MKTAG(0, lfs2_tag_splice(tag), 0);
+        }
+
+        if ((gmask & tag) == (gmask & (gtag - gdiff))) {
+            if (lfs2_tag_isdelete(tag)) {
+                return LFS2_ERR_NOENT;
+            }
+
+            lfs2_size_t diff = lfs2_min(lfs2_tag_size(tag), gsize);
+            err = lfs2_bd_read(lfs2,
+                    NULL, &lfs2->rcache, diff,
+                    dir->pair[0], off+sizeof(tag)+goff, gbuffer, diff);
+            if (err) {
+                return err;
+            }
+
+            memset((uint8_t*)gbuffer + diff, 0, gsize - diff);
+
+            return tag + gdiff;
+        }
+    }
+
+    return LFS2_ERR_NOENT;
+}
+
+static lfs2_stag_t lfs2_dir_get(lfs2_t *lfs2, const lfs2_mdir_t *dir,
+        lfs2_tag_t gmask, lfs2_tag_t gtag, void *buffer) {
+    return lfs2_dir_getslice(lfs2, dir,
+            gmask, gtag,
+            0, buffer, lfs2_tag_size(gtag));
+}
+
+static int lfs2_dir_getread(lfs2_t *lfs2, const lfs2_mdir_t *dir,
+        const lfs2_cache_t *pcache, lfs2_cache_t *rcache, lfs2_size_t hint,
+        lfs2_tag_t gmask, lfs2_tag_t gtag,
+        lfs2_off_t off, void *buffer, lfs2_size_t size) {
+    uint8_t *data = buffer;
+    if (off+size > lfs2->cfg->block_size) {
+        return LFS2_ERR_CORRUPT;
+    }
+
+    while (size > 0) {
+        lfs2_size_t diff = size;
+
+        if (pcache && pcache->block == LFS2_BLOCK_INLINE &&
+                off < pcache->off + pcache->size) {
+            if (off >= pcache->off) {
+                // is already in pcache?
+                diff = lfs2_min(diff, pcache->size - (off-pcache->off));
+                memcpy(data, &pcache->buffer[off-pcache->off], diff);
+
+                data += diff;
+                off += diff;
+                size -= diff;
+                continue;
+            }
+
+            // pcache takes priority
+            diff = lfs2_min(diff, pcache->off-off);
+        }
+
+        if (rcache->block == LFS2_BLOCK_INLINE &&
+                off < rcache->off + rcache->size) {
+            if (off >= rcache->off) {
+                // is already in rcache?
+                diff = lfs2_min(diff, rcache->size - (off-rcache->off));
+                memcpy(data, &rcache->buffer[off-rcache->off], diff);
+
+                data += diff;
+                off += diff;
+                size -= diff;
+                continue;
+            }
+
+            // rcache takes priority
+            diff = lfs2_min(diff, rcache->off-off);
+        }
+
+        // load to cache, first condition can no longer fail
+        rcache->block = LFS2_BLOCK_INLINE;
+        rcache->off = lfs2_aligndown(off, lfs2->cfg->read_size);
+        rcache->size = lfs2_min(lfs2_alignup(off+hint, lfs2->cfg->read_size),
+                lfs2->cfg->cache_size);
+        int err = lfs2_dir_getslice(lfs2, dir, gmask, gtag,
+                rcache->off, rcache->buffer, rcache->size);
+        if (err < 0) {
+            return err;
+        }
+    }
+
+    return 0;
+}
+
+#ifndef LFS2_READONLY
+static int lfs2_dir_traverse_filter(void *p,
+        lfs2_tag_t tag, const void *buffer) {
+    lfs2_tag_t *filtertag = p;
+    (void)buffer;
+
+    // which mask depends on unique bit in tag structure
+    uint32_t mask = (tag & LFS2_MKTAG(0x100, 0, 0))
+            ? LFS2_MKTAG(0x7ff, 0x3ff, 0)
+            : LFS2_MKTAG(0x700, 0x3ff, 0);
+
+    // check for redundancy
+    if ((mask & tag) == (mask & *filtertag) ||
+            lfs2_tag_isdelete(*filtertag) ||
+            (LFS2_MKTAG(0x7ff, 0x3ff, 0) & tag) == (
+                LFS2_MKTAG(LFS2_TYPE_DELETE, 0, 0) |
+                    (LFS2_MKTAG(0, 0x3ff, 0) & *filtertag))) {
+        return true;
+    }
+
+    // check if we need to adjust for created/deleted tags
+    if (lfs2_tag_type1(tag) == LFS2_TYPE_SPLICE &&
+            lfs2_tag_id(tag) <= lfs2_tag_id(*filtertag)) {
+        *filtertag += LFS2_MKTAG(0, lfs2_tag_splice(tag), 0);
+    }
+
+    return false;
+}
+#endif
+
+#ifndef LFS2_READONLY
+static int lfs2_dir_traverse(lfs2_t *lfs2,
+        const lfs2_mdir_t *dir, lfs2_off_t off, lfs2_tag_t ptag,
+        const struct lfs2_mattr *attrs, int attrcount,
+        lfs2_tag_t tmask, lfs2_tag_t ttag,
+        uint16_t begin, uint16_t end, int16_t diff,
+        int (*cb)(void *data, lfs2_tag_t tag, const void *buffer), void *data) {
+    // iterate over directory and attrs
+    while (true) {
+        lfs2_tag_t tag;
+        const void *buffer;
+        struct lfs2_diskoff disk;
+        if (off+lfs2_tag_dsize(ptag) < dir->off) {
+            off += lfs2_tag_dsize(ptag);
+            int err = lfs2_bd_read(lfs2,
+                    NULL, &lfs2->rcache, sizeof(tag),
+                    dir->pair[0], off, &tag, sizeof(tag));
+            if (err) {
+                return err;
+            }
+
+            tag = (lfs2_frombe32(tag) ^ ptag) | 0x80000000;
+            disk.block = dir->pair[0];
+            disk.off = off+sizeof(lfs2_tag_t);
+            buffer = &disk;
+            ptag = tag;
+        } else if (attrcount > 0) {
+            tag = attrs[0].tag;
+            buffer = attrs[0].buffer;
+            attrs += 1;
+            attrcount -= 1;
+        } else {
+            return 0;
+        }
+
+        lfs2_tag_t mask = LFS2_MKTAG(0x7ff, 0, 0);
+        if ((mask & tmask & tag) != (mask & tmask & ttag)) {
+            continue;
+        }
+
+        // do we need to filter? inlining the filtering logic here allows
+        // for some minor optimizations
+        if (lfs2_tag_id(tmask) != 0) {
+            // scan for duplicates and update tag based on creates/deletes
+            int filter = lfs2_dir_traverse(lfs2,
+                    dir, off, ptag, attrs, attrcount,
+                    0, 0, 0, 0, 0,
+                    lfs2_dir_traverse_filter, &tag);
+            if (filter < 0) {
+                return filter;
+            }
+
+            if (filter) {
+                continue;
+            }
+
+            // in filter range?
+            if (!(lfs2_tag_id(tag) >= begin && lfs2_tag_id(tag) < end)) {
+                continue;
+            }
+        }
+
+        // handle special cases for mcu-side operations
+        if (lfs2_tag_type3(tag) == LFS2_FROM_NOOP) {
+            // do nothing
+        } else if (lfs2_tag_type3(tag) == LFS2_FROM_MOVE) {
+            uint16_t fromid = lfs2_tag_size(tag);
+            uint16_t toid = lfs2_tag_id(tag);
+            int err = lfs2_dir_traverse(lfs2,
+                    buffer, 0, 0xffffffff, NULL, 0,
+                    LFS2_MKTAG(0x600, 0x3ff, 0),
+                    LFS2_MKTAG(LFS2_TYPE_STRUCT, 0, 0),
+                    fromid, fromid+1, toid-fromid+diff,
+                    cb, data);
+            if (err) {
+                return err;
+            }
+        } else if (lfs2_tag_type3(tag) == LFS2_FROM_USERATTRS) {
+            for (unsigned i = 0; i < lfs2_tag_size(tag); i++) {
+                const struct lfs2_attr *a = buffer;
+                int err = cb(data, LFS2_MKTAG(LFS2_TYPE_USERATTR + a[i].type,
+                        lfs2_tag_id(tag) + diff, a[i].size), a[i].buffer);
+                if (err) {
+                    return err;
+                }
+            }
+        } else {
+            int err = cb(data, tag + LFS2_MKTAG(0, diff, 0), buffer);
+            if (err) {
+                return err;
+            }
+        }
+    }
+}
+#endif
+
+static lfs2_stag_t lfs2_dir_fetchmatch(lfs2_t *lfs2,
+        lfs2_mdir_t *dir, const lfs2_block_t pair[2],
+        lfs2_tag_t fmask, lfs2_tag_t ftag, uint16_t *id,
+        int (*cb)(void *data, lfs2_tag_t tag, const void *buffer), void *data) {
+    // we can find tag very efficiently during a fetch, since we're already
+    // scanning the entire directory
+    lfs2_stag_t besttag = -1;
+
+    // if either block address is invalid we return LFS2_ERR_CORRUPT here,
+    // otherwise later writes to the pair could fail
+    if (pair[0] >= lfs2->cfg->block_count || pair[1] >= lfs2->cfg->block_count) {
+        return LFS2_ERR_CORRUPT;
+    }
+
+    // find the block with the most recent revision
+    uint32_t revs[2] = {0, 0};
+    int r = 0;
+    for (int i = 0; i < 2; i++) {
+        int err = lfs2_bd_read(lfs2,
+                NULL, &lfs2->rcache, sizeof(revs[i]),
+                pair[i], 0, &revs[i], sizeof(revs[i]));
+        revs[i] = lfs2_fromle32(revs[i]);
+        if (err && err != LFS2_ERR_CORRUPT) {
+            return err;
+        }
+
+        if (err != LFS2_ERR_CORRUPT &&
+                lfs2_scmp(revs[i], revs[(i+1)%2]) > 0) {
+            r = i;
+        }
+    }
+
+    dir->pair[0] = pair[(r+0)%2];
+    dir->pair[1] = pair[(r+1)%2];
+    dir->rev = revs[(r+0)%2];
+    dir->off = 0; // nonzero = found some commits
+
+    // now scan tags to fetch the actual dir and find possible match
+    for (int i = 0; i < 2; i++) {
+        lfs2_off_t off = 0;
+        lfs2_tag_t ptag = 0xffffffff;
+
+        uint16_t tempcount = 0;
+        lfs2_block_t temptail[2] = {LFS2_BLOCK_NULL, LFS2_BLOCK_NULL};
+        bool tempsplit = false;
+        lfs2_stag_t tempbesttag = besttag;
+
+        dir->rev = lfs2_tole32(dir->rev);
+        uint32_t crc = lfs2_crc(0xffffffff, &dir->rev, sizeof(dir->rev));
+        dir->rev = lfs2_fromle32(dir->rev);
+
+        while (true) {
+            // extract next tag
+            lfs2_tag_t tag;
+            off += lfs2_tag_dsize(ptag);
+            int err = lfs2_bd_read(lfs2,
+                    NULL, &lfs2->rcache, lfs2->cfg->block_size,
+                    dir->pair[0], off, &tag, sizeof(tag));
+            if (err) {
+                if (err == LFS2_ERR_CORRUPT) {
+                    // can't continue?
+                    dir->erased = false;
+                    break;
+                }
+                return err;
+            }
+
+            crc = lfs2_crc(crc, &tag, sizeof(tag));
+            tag = lfs2_frombe32(tag) ^ ptag;
+
+            // next commit not yet programmed or we're not in valid range
+            if (!lfs2_tag_isvalid(tag)) {
+                dir->erased = (lfs2_tag_type1(ptag) == LFS2_TYPE_CRC &&
+                        dir->off % lfs2->cfg->prog_size == 0);
+                break;
+            } else if (off + lfs2_tag_dsize(tag) > lfs2->cfg->block_size) {
+                dir->erased = false;
+                break;
+            }
+
+            ptag = tag;
+
+            if (lfs2_tag_type1(tag) == LFS2_TYPE_CRC) {
+                // check the crc attr
+                uint32_t dcrc;
+                err = lfs2_bd_read(lfs2,
+                        NULL, &lfs2->rcache, lfs2->cfg->block_size,
+                        dir->pair[0], off+sizeof(tag), &dcrc, sizeof(dcrc));
+                if (err) {
+                    if (err == LFS2_ERR_CORRUPT) {
+                        dir->erased = false;
+                        break;
+                    }
+                    return err;
+                }
+                dcrc = lfs2_fromle32(dcrc);
+
+                if (crc != dcrc) {
+                    dir->erased = false;
+                    break;
+                }
+
+                // reset the next bit if we need to
+                ptag ^= (lfs2_tag_t)(lfs2_tag_chunk(tag) & 1U) << 31;
+
+                // toss our crc into the filesystem seed for
+                // pseudorandom numbers, note we use another crc here
+                // as a collection function because it is sufficiently
+                // random and convenient
+                lfs2->seed = lfs2_crc(lfs2->seed, &crc, sizeof(crc));
+
+                // update with what's found so far
+                besttag = tempbesttag;
+                dir->off = off + lfs2_tag_dsize(tag);
+                dir->etag = ptag;
+                dir->count = tempcount;
+                dir->tail[0] = temptail[0];
+                dir->tail[1] = temptail[1];
+                dir->split = tempsplit;
+
+                // reset crc
+                crc = 0xffffffff;
+                continue;
+            }
+
+            // crc the entry first, hopefully leaving it in the cache
+            for (lfs2_off_t j = sizeof(tag); j < lfs2_tag_dsize(tag); j++) {
+                uint8_t dat;
+                err = lfs2_bd_read(lfs2,
+                        NULL, &lfs2->rcache, lfs2->cfg->block_size,
+                        dir->pair[0], off+j, &dat, 1);
+                if (err) {
+                    if (err == LFS2_ERR_CORRUPT) {
+                        dir->erased = false;
+                        break;
+                    }
+                    return err;
+                }
+
+                crc = lfs2_crc(crc, &dat, 1);
+            }
+
+            // directory modification tags?
+            if (lfs2_tag_type1(tag) == LFS2_TYPE_NAME) {
+                // increase count of files if necessary
+                if (lfs2_tag_id(tag) >= tempcount) {
+                    tempcount = lfs2_tag_id(tag) + 1;
+                }
+            } else if (lfs2_tag_type1(tag) == LFS2_TYPE_SPLICE) {
+                tempcount += lfs2_tag_splice(tag);
+
+                if (tag == (LFS2_MKTAG(LFS2_TYPE_DELETE, 0, 0) |
+                        (LFS2_MKTAG(0, 0x3ff, 0) & tempbesttag))) {
+                    tempbesttag |= 0x80000000;
+                } else if (tempbesttag != -1 &&
+                        lfs2_tag_id(tag) <= lfs2_tag_id(tempbesttag)) {
+                    tempbesttag += LFS2_MKTAG(0, lfs2_tag_splice(tag), 0);
+                }
+            } else if (lfs2_tag_type1(tag) == LFS2_TYPE_TAIL) {
+                tempsplit = (lfs2_tag_chunk(tag) & 1);
+
+                err = lfs2_bd_read(lfs2,
+                        NULL, &lfs2->rcache, lfs2->cfg->block_size,
+                        dir->pair[0], off+sizeof(tag), &temptail, 8);
+                if (err) {
+                    if (err == LFS2_ERR_CORRUPT) {
+                        dir->erased = false;
+                        break;
+                    }
+                }
+                lfs2_pair_fromle32(temptail);
+            }
+
+            // found a match for our fetcher?
+            if ((fmask & tag) == (fmask & ftag)) {
+                int res = cb(data, tag, &(struct lfs2_diskoff){
+                        dir->pair[0], off+sizeof(tag)});
+                if (res < 0) {
+                    if (res == LFS2_ERR_CORRUPT) {
+                        dir->erased = false;
+                        break;
+                    }
+                    return res;
+                }
+
+                if (res == LFS2_CMP_EQ) {
+                    // found a match
+                    tempbesttag = tag;
+                } else if ((LFS2_MKTAG(0x7ff, 0x3ff, 0) & tag) ==
+                        (LFS2_MKTAG(0x7ff, 0x3ff, 0) & tempbesttag)) {
+                    // found an identical tag, but contents didn't match
+                    // this must mean that our besttag has been overwritten
+                    tempbesttag = -1;
+                } else if (res == LFS2_CMP_GT &&
+                        lfs2_tag_id(tag) <= lfs2_tag_id(tempbesttag)) {
+                    // found a greater match, keep track to keep things sorted
+                    tempbesttag = tag | 0x80000000;
+                }
+            }
+        }
+
+        // consider what we have good enough
+        if (dir->off > 0) {
+            // synthetic move
+            if (lfs2_gstate_hasmovehere(&lfs2->gdisk, dir->pair)) {
+                if (lfs2_tag_id(lfs2->gdisk.tag) == lfs2_tag_id(besttag)) {
+                    besttag |= 0x80000000;
+                } else if (besttag != -1 &&
+                        lfs2_tag_id(lfs2->gdisk.tag) < lfs2_tag_id(besttag)) {
+                    besttag -= LFS2_MKTAG(0, 1, 0);
+                }
+            }
+
+            // found tag? or found best id?
+            if (id) {
+                *id = lfs2_min(lfs2_tag_id(besttag), dir->count);
+            }
+
+            if (lfs2_tag_isvalid(besttag)) {
+                return besttag;
+            } else if (lfs2_tag_id(besttag) < dir->count) {
+                return LFS2_ERR_NOENT;
+            } else {
+                return 0;
+            }
+        }
+
+        // failed, try the other block?
+        lfs2_pair_swap(dir->pair);
+        dir->rev = revs[(r+1)%2];
+    }
+
+    LFS2_ERROR("Corrupted dir pair at {0x%"PRIx32", 0x%"PRIx32"}",
+            dir->pair[0], dir->pair[1]);
+    return LFS2_ERR_CORRUPT;
+}
+
+static int lfs2_dir_fetch(lfs2_t *lfs2,
+        lfs2_mdir_t *dir, const lfs2_block_t pair[2]) {
+    // note, mask=-1, tag=-1 can never match a tag since this
+    // pattern has the invalid bit set
+    return (int)lfs2_dir_fetchmatch(lfs2, dir, pair,
+            (lfs2_tag_t)-1, (lfs2_tag_t)-1, NULL, NULL, NULL);
+}
+
+static int lfs2_dir_getgstate(lfs2_t *lfs2, const lfs2_mdir_t *dir,
+        lfs2_gstate_t *gstate) {
+    lfs2_gstate_t temp;
+    lfs2_stag_t res = lfs2_dir_get(lfs2, dir, LFS2_MKTAG(0x7ff, 0, 0),
+            LFS2_MKTAG(LFS2_TYPE_MOVESTATE, 0, sizeof(temp)), &temp);
+    if (res < 0 && res != LFS2_ERR_NOENT) {
+        return res;
+    }
+
+    if (res != LFS2_ERR_NOENT) {
+        // xor together to find resulting gstate
+        lfs2_gstate_fromle32(&temp);
+        lfs2_gstate_xor(gstate, &temp);
+    }
+
+    return 0;
+}
+
+static int lfs2_dir_getinfo(lfs2_t *lfs2, lfs2_mdir_t *dir,
+        uint16_t id, struct lfs2_info *info) {
+    if (id == 0x3ff) {
+        // special case for root
+        strcpy(info->name, "/");
+        info->type = LFS2_TYPE_DIR;
+        return 0;
+    }
+
+    lfs2_stag_t tag = lfs2_dir_get(lfs2, dir, LFS2_MKTAG(0x780, 0x3ff, 0),
+            LFS2_MKTAG(LFS2_TYPE_NAME, id, lfs2->name_max+1), info->name);
+    if (tag < 0) {
+        return (int)tag;
+    }
+
+    info->type = lfs2_tag_type3(tag);
+
+    struct lfs2_ctz ctz;
+    tag = lfs2_dir_get(lfs2, dir, LFS2_MKTAG(0x700, 0x3ff, 0),
+            LFS2_MKTAG(LFS2_TYPE_STRUCT, id, sizeof(ctz)), &ctz);
+    if (tag < 0) {
+        return (int)tag;
+    }
+    lfs2_ctz_fromle32(&ctz);
+
+    if (lfs2_tag_type3(tag) == LFS2_TYPE_CTZSTRUCT) {
+        info->size = ctz.size;
+    } else if (lfs2_tag_type3(tag) == LFS2_TYPE_INLINESTRUCT) {
+        info->size = lfs2_tag_size(tag);
+    }
+
+    return 0;
+}
+
+struct lfs2_dir_find_match {
+    lfs2_t *lfs2;
+    const void *name;
+    lfs2_size_t size;
+};
+
+static int lfs2_dir_find_match(void *data,
+        lfs2_tag_t tag, const void *buffer) {
+    struct lfs2_dir_find_match *name = data;
+    lfs2_t *lfs2 = name->lfs2;
+    const struct lfs2_diskoff *disk = buffer;
+
+    // compare with disk
+    lfs2_size_t diff = lfs2_min(name->size, lfs2_tag_size(tag));
+    int res = lfs2_bd_cmp(lfs2,
+            NULL, &lfs2->rcache, diff,
+            disk->block, disk->off, name->name, diff);
+    if (res != LFS2_CMP_EQ) {
+        return res;
+    }
+
+    // only equal if our size is still the same
+    if (name->size != lfs2_tag_size(tag)) {
+        return (name->size < lfs2_tag_size(tag)) ? LFS2_CMP_LT : LFS2_CMP_GT;
+    }
+
+    // found a match!
+    return LFS2_CMP_EQ;
+}
+
+static lfs2_stag_t lfs2_dir_find(lfs2_t *lfs2, lfs2_mdir_t *dir,
+        const char **path, uint16_t *id) {
+    // we reduce path to a single name if we can find it
+    const char *name = *path;
+    if (id) {
+        *id = 0x3ff;
+    }
+
+    // default to root dir
+    lfs2_stag_t tag = LFS2_MKTAG(LFS2_TYPE_DIR, 0x3ff, 0);
+    dir->tail[0] = lfs2->root[0];
+    dir->tail[1] = lfs2->root[1];
+
+    while (true) {
+nextname:
+        // skip slashes
+        name += strspn(name, "/");
+        lfs2_size_t namelen = strcspn(name, "/");
+
+        // skip '.' and root '..'
+        if ((namelen == 1 && memcmp(name, ".", 1) == 0) ||
+            (namelen == 2 && memcmp(name, "..", 2) == 0)) {
+            name += namelen;
+            goto nextname;
+        }
+
+        // skip if matched by '..' in name
+        const char *suffix = name + namelen;
+        lfs2_size_t sufflen;
+        int depth = 1;
+        while (true) {
+            suffix += strspn(suffix, "/");
+            sufflen = strcspn(suffix, "/");
+            if (sufflen == 0) {
+                break;
+            }
+
+            if (sufflen == 2 && memcmp(suffix, "..", 2) == 0) {
+                depth -= 1;
+                if (depth == 0) {
+                    name = suffix + sufflen;
+                    goto nextname;
+                }
+            } else {
+                depth += 1;
+            }
+
+            suffix += sufflen;
+        }
+
+        // found path
+        if (name[0] == '\0') {
+            return tag;
+        }
+
+        // update what we've found so far
+        *path = name;
+
+        // only continue if we hit a directory
+        if (lfs2_tag_type3(tag) != LFS2_TYPE_DIR) {
+            return LFS2_ERR_NOTDIR;
+        }
+
+        // grab the entry data
+        if (lfs2_tag_id(tag) != 0x3ff) {
+            lfs2_stag_t res = lfs2_dir_get(lfs2, dir, LFS2_MKTAG(0x700, 0x3ff, 0),
+                    LFS2_MKTAG(LFS2_TYPE_STRUCT, lfs2_tag_id(tag), 8), dir->tail);
+            if (res < 0) {
+                return res;
+            }
+            lfs2_pair_fromle32(dir->tail);
+        }
+
+        // find entry matching name
+        while (true) {
+            tag = lfs2_dir_fetchmatch(lfs2, dir, dir->tail,
+                    LFS2_MKTAG(0x780, 0, 0),
+                    LFS2_MKTAG(LFS2_TYPE_NAME, 0, namelen),
+                     // are we last name?
+                    (strchr(name, '/') == NULL) ? id : NULL,
+                    lfs2_dir_find_match, &(struct lfs2_dir_find_match){
+                        lfs2, name, namelen});
+            if (tag < 0) {
+                return tag;
+            }
+
+            if (tag) {
+                break;
+            }
+
+            if (!dir->split) {
+                return LFS2_ERR_NOENT;
+            }
+        }
+
+        // to next name
+        name += namelen;
+    }
+}
+
+// commit logic
+struct lfs2_commit {
+    lfs2_block_t block;
+    lfs2_off_t off;
+    lfs2_tag_t ptag;
+    uint32_t crc;
+
+    lfs2_off_t begin;
+    lfs2_off_t end;
+};
+
+#ifndef LFS2_READONLY
+static int lfs2_dir_commitprog(lfs2_t *lfs2, struct lfs2_commit *commit,
+        const void *buffer, lfs2_size_t size) {
+    int err = lfs2_bd_prog(lfs2,
+            &lfs2->pcache, &lfs2->rcache, false,
+            commit->block, commit->off ,
+            (const uint8_t*)buffer, size);
+    if (err) {
+        return err;
+    }
+
+    commit->crc = lfs2_crc(commit->crc, buffer, size);
+    commit->off += size;
+    return 0;
+}
+#endif
+
+#ifndef LFS2_READONLY
+static int lfs2_dir_commitattr(lfs2_t *lfs2, struct lfs2_commit *commit,
+        lfs2_tag_t tag, const void *buffer) {
+    // check if we fit
+    lfs2_size_t dsize = lfs2_tag_dsize(tag);
+    if (commit->off + dsize > commit->end) {
+        return LFS2_ERR_NOSPC;
+    }
+
+    // write out tag
+    lfs2_tag_t ntag = lfs2_tobe32((tag & 0x7fffffff) ^ commit->ptag);
+    int err = lfs2_dir_commitprog(lfs2, commit, &ntag, sizeof(ntag));
+    if (err) {
+        return err;
+    }
+
+    if (!(tag & 0x80000000)) {
+        // from memory
+        err = lfs2_dir_commitprog(lfs2, commit, buffer, dsize-sizeof(tag));
+        if (err) {
+            return err;
+        }
+    } else {
+        // from disk
+        const struct lfs2_diskoff *disk = buffer;
+        for (lfs2_off_t i = 0; i < dsize-sizeof(tag); i++) {
+            // rely on caching to make this efficient
+            uint8_t dat;
+            err = lfs2_bd_read(lfs2,
+                    NULL, &lfs2->rcache, dsize-sizeof(tag)-i,
+                    disk->block, disk->off+i, &dat, 1);
+            if (err) {
+                return err;
+            }
+
+            err = lfs2_dir_commitprog(lfs2, commit, &dat, 1);
+            if (err) {
+                return err;
+            }
+        }
+    }
+
+    commit->ptag = tag & 0x7fffffff;
+    return 0;
+}
+#endif
+
+#ifndef LFS2_READONLY
+static int lfs2_dir_commitcrc(lfs2_t *lfs2, struct lfs2_commit *commit) {
+    // align to program units
+    const lfs2_off_t end = lfs2_alignup(commit->off + 2*sizeof(uint32_t),
+            lfs2->cfg->prog_size);
+
+    lfs2_off_t off1 = 0;
+    uint32_t crc1 = 0;
+
+    // create crc tags to fill up remainder of commit, note that
+    // padding is not crced, which lets fetches skip padding but
+    // makes committing a bit more complicated
+    while (commit->off < end) {
+        lfs2_off_t off = commit->off + sizeof(lfs2_tag_t);
+        lfs2_off_t noff = lfs2_min(end - off, 0x3fe) + off;
+        if (noff < end) {
+            noff = lfs2_min(noff, end - 2*sizeof(uint32_t));
+        }
+
+        // read erased state from next program unit
+        lfs2_tag_t tag = 0xffffffff;
+        int err = lfs2_bd_read(lfs2,
+                NULL, &lfs2->rcache, sizeof(tag),
+                commit->block, noff, &tag, sizeof(tag));
+        if (err && err != LFS2_ERR_CORRUPT) {
+            return err;
+        }
+
+        // build crc tag
+        bool reset = ~lfs2_frombe32(tag) >> 31;
+        tag = LFS2_MKTAG(LFS2_TYPE_CRC + reset, 0x3ff, noff - off);
+
+        // write out crc
+        uint32_t footer[2];
+        footer[0] = lfs2_tobe32(tag ^ commit->ptag);
+        commit->crc = lfs2_crc(commit->crc, &footer[0], sizeof(footer[0]));
+        footer[1] = lfs2_tole32(commit->crc);
+        err = lfs2_bd_prog(lfs2,
+                &lfs2->pcache, &lfs2->rcache, false,
+                commit->block, commit->off, &footer, sizeof(footer));
+        if (err) {
+            return err;
+        }
+
+        // keep track of non-padding checksum to verify
+        if (off1 == 0) {
+            off1 = commit->off + sizeof(uint32_t);
+            crc1 = commit->crc;
+        }
+
+        commit->off += sizeof(tag)+lfs2_tag_size(tag);
+        commit->ptag = tag ^ ((lfs2_tag_t)reset << 31);
+        commit->crc = 0xffffffff; // reset crc for next "commit"
+    }
+
+    // flush buffers
+    int err = lfs2_bd_sync(lfs2, &lfs2->pcache, &lfs2->rcache, false);
+    if (err) {
+        return err;
+    }
+
+    // successful commit, check checksums to make sure
+    lfs2_off_t off = commit->begin;
+    lfs2_off_t noff = off1;
+    while (off < end) {
+        uint32_t crc = 0xffffffff;
+        for (lfs2_off_t i = off; i < noff+sizeof(uint32_t); i++) {
+            // check against written crc, may catch blocks that
+            // become readonly and match our commit size exactly
+            if (i == off1 && crc != crc1) {
+                return LFS2_ERR_CORRUPT;
+            }
+
+            // leave it up to caching to make this efficient
+            uint8_t dat;
+            err = lfs2_bd_read(lfs2,
+                    NULL, &lfs2->rcache, noff+sizeof(uint32_t)-i,
+                    commit->block, i, &dat, 1);
+            if (err) {
+                return err;
+            }
+
+            crc = lfs2_crc(crc, &dat, 1);
+        }
+
+        // detected write error?
+        if (crc != 0) {
+            return LFS2_ERR_CORRUPT;
+        }
+
+        // skip padding
+        off = lfs2_min(end - noff, 0x3fe) + noff;
+        if (off < end) {
+            off = lfs2_min(off, end - 2*sizeof(uint32_t));
+        }
+        noff = off + sizeof(uint32_t);
+    }
+
+    return 0;
+}
+#endif
+
+#ifndef LFS2_READONLY
+static int lfs2_dir_alloc(lfs2_t *lfs2, lfs2_mdir_t *dir) {
+    // allocate pair of dir blocks (backwards, so we write block 1 first)
+    for (int i = 0; i < 2; i++) {
+        int err = lfs2_alloc(lfs2, &dir->pair[(i+1)%2]);
+        if (err) {
+            return err;
+        }
+    }
+
+    // zero for reproducability in case initial block is unreadable
+    dir->rev = 0;
+
+    // rather than clobbering one of the blocks we just pretend
+    // the revision may be valid
+    int err = lfs2_bd_read(lfs2,
+            NULL, &lfs2->rcache, sizeof(dir->rev),
+            dir->pair[0], 0, &dir->rev, sizeof(dir->rev));
+    dir->rev = lfs2_fromle32(dir->rev);
+    if (err && err != LFS2_ERR_CORRUPT) {
+        return err;
+    }
+
+    // to make sure we don't immediately evict, align the new revision count
+    // to our block_cycles modulus, see lfs2_dir_compact for why our modulus
+    // is tweaked this way
+    if (lfs2->cfg->block_cycles > 0) {
+        dir->rev = lfs2_alignup(dir->rev, ((lfs2->cfg->block_cycles+1)|1));
+    }
+
+    // set defaults
+    dir->off = sizeof(dir->rev);
+    dir->etag = 0xffffffff;
+    dir->count = 0;
+    dir->tail[0] = LFS2_BLOCK_NULL;
+    dir->tail[1] = LFS2_BLOCK_NULL;
+    dir->erased = false;
+    dir->split = false;
+
+    // don't write out yet, let caller take care of that
+    return 0;
+}
+#endif
+
+#ifndef LFS2_READONLY
+static int lfs2_dir_drop(lfs2_t *lfs2, lfs2_mdir_t *dir, lfs2_mdir_t *tail) {
+    // steal state
+    int err = lfs2_dir_getgstate(lfs2, tail, &lfs2->gdelta);
+    if (err) {
+        return err;
+    }
+
+    // steal tail
+    lfs2_pair_tole32(tail->tail);
+    err = lfs2_dir_commit(lfs2, dir, LFS2_MKATTRS(
+            {LFS2_MKTAG(LFS2_TYPE_TAIL + tail->split, 0x3ff, 8), tail->tail}));
+    lfs2_pair_fromle32(tail->tail);
+    if (err) {
+        return err;
+    }
+
+    return 0;
+}
+#endif
+
+#ifndef LFS2_READONLY
+static int lfs2_dir_split(lfs2_t *lfs2,
+        lfs2_mdir_t *dir, const struct lfs2_mattr *attrs, int attrcount,
+        lfs2_mdir_t *source, uint16_t split, uint16_t end) {
+    // create tail directory
+    lfs2_alloc_ack(lfs2);
+    lfs2_mdir_t tail;
+    int err = lfs2_dir_alloc(lfs2, &tail);
+    if (err) {
+        return err;
+    }
+
+    tail.split = dir->split;
+    tail.tail[0] = dir->tail[0];
+    tail.tail[1] = dir->tail[1];
+
+    err = lfs2_dir_compact(lfs2, &tail, attrs, attrcount, source, split, end);
+    if (err) {
+        return err;
+    }
+
+    dir->tail[0] = tail.pair[0];
+    dir->tail[1] = tail.pair[1];
+    dir->split = true;
+
+    // update root if needed
+    if (lfs2_pair_cmp(dir->pair, lfs2->root) == 0 && split == 0) {
+        lfs2->root[0] = tail.pair[0];
+        lfs2->root[1] = tail.pair[1];
+    }
+
+    return 0;
+}
+#endif
+
+#ifndef LFS2_READONLY
+static int lfs2_dir_commit_size(void *p, lfs2_tag_t tag, const void *buffer) {
+    lfs2_size_t *size = p;
+    (void)buffer;
+
+    *size += lfs2_tag_dsize(tag);
+    return 0;
+}
+#endif
+
+#ifndef LFS2_READONLY
+struct lfs2_dir_commit_commit {
+    lfs2_t *lfs2;
+    struct lfs2_commit *commit;
+};
+#endif
+
+#ifndef LFS2_READONLY
+static int lfs2_dir_commit_commit(void *p, lfs2_tag_t tag, const void *buffer) {
+    struct lfs2_dir_commit_commit *commit = p;
+    return lfs2_dir_commitattr(commit->lfs2, commit->commit, tag, buffer);
+}
+#endif
+
+#ifndef LFS2_READONLY
+static int lfs2_dir_compact(lfs2_t *lfs2,
+        lfs2_mdir_t *dir, const struct lfs2_mattr *attrs, int attrcount,
+        lfs2_mdir_t *source, uint16_t begin, uint16_t end) {
+    // save some state in case block is bad
+    const lfs2_block_t oldpair[2] = {dir->pair[0], dir->pair[1]};
+    bool relocated = false;
+    bool tired = false;
+
+    // should we split?
+    while (end - begin > 1) {
+        // find size
+        lfs2_size_t size = 0;
+        int err = lfs2_dir_traverse(lfs2,
+                source, 0, 0xffffffff, attrs, attrcount,
+                LFS2_MKTAG(0x400, 0x3ff, 0),
+                LFS2_MKTAG(LFS2_TYPE_NAME, 0, 0),
+                begin, end, -begin,
+                lfs2_dir_commit_size, &size);
+        if (err) {
+            return err;
+        }
+
+        // space is complicated, we need room for tail, crc, gstate,
+        // cleanup delete, and we cap at half a block to give room
+        // for metadata updates.
+        if (end - begin < 0xff &&
+                size <= lfs2_min(lfs2->cfg->block_size - 36,
+                    lfs2_alignup(lfs2->cfg->block_size/2,
+                        lfs2->cfg->prog_size))) {
+            break;
+        }
+
+        // can't fit, need to split, we should really be finding the
+        // largest size that fits with a small binary search, but right now
+        // it's not worth the code size
+        uint16_t split = (end - begin) / 2;
+        err = lfs2_dir_split(lfs2, dir, attrs, attrcount,
+                source, begin+split, end);
+        if (err) {
+            // if we fail to split, we may be able to overcompact, unless
+            // we're too big for even the full block, in which case our
+            // only option is to error
+            if (err == LFS2_ERR_NOSPC && size <= lfs2->cfg->block_size - 36) {
+                break;
+            }
+            return err;
+        }
+
+        end = begin + split;
+    }
+
+    // increment revision count
+    dir->rev += 1;
+    // If our revision count == n * block_cycles, we should force a relocation,
+    // this is how littlefs wear-levels at the metadata-pair level. Note that we
+    // actually use (block_cycles+1)|1, this is to avoid two corner cases:
+    // 1. block_cycles = 1, which would prevent relocations from terminating
+    // 2. block_cycles = 2n, which, due to aliasing, would only ever relocate
+    //    one metadata block in the pair, effectively making this useless
+    if (lfs2->cfg->block_cycles > 0 &&
+            (dir->rev % ((lfs2->cfg->block_cycles+1)|1) == 0)) {
+        if (lfs2_pair_cmp(dir->pair, (const lfs2_block_t[2]){0, 1}) == 0) {
+            // oh no! we're writing too much to the superblock,
+            // should we expand?
+            lfs2_ssize_t res = lfs2_fs_rawsize(lfs2);
+            if (res < 0) {
+                return res;
+            }
+
+            // do we have extra space? littlefs can't reclaim this space
+            // by itself, so expand cautiously
+            if ((lfs2_size_t)res < lfs2->cfg->block_count/2) {
+                LFS2_DEBUG("Expanding superblock at rev %"PRIu32, dir->rev);
+                int err = lfs2_dir_split(lfs2, dir, attrs, attrcount,
+                        source, begin, end);
+                if (err && err != LFS2_ERR_NOSPC) {
+                    return err;
+                }
+
+                // welp, we tried, if we ran out of space there's not much
+                // we can do, we'll error later if we've become frozen
+                if (!err) {
+                    end = begin;
+                }
+            }
+#ifdef LFS2_MIGRATE
+        } else if (lfs2->lfs21) {
+            // do not proactively relocate blocks during migrations, this
+            // can cause a number of failure states such: clobbering the
+            // v1 superblock if we relocate root, and invalidating directory
+            // pointers if we relocate the head of a directory. On top of
+            // this, relocations increase the overall complexity of
+            // lfs2_migration, which is already a delicate operation.
+#endif
+        } else {
+            // we're writing too much, time to relocate
+            tired = true;
+            goto relocate;
+        }
+    }
+
+    // begin loop to commit compaction to blocks until a compact sticks
+    while (true) {
+        {
+            // setup commit state
+            struct lfs2_commit commit = {
+                .block = dir->pair[1],
+                .off = 0,
+                .ptag = 0xffffffff,
+                .crc = 0xffffffff,
+
+                .begin = 0,
+                .end = lfs2->cfg->block_size - 8,
+            };
+
+            // erase block to write to
+            int err = lfs2_bd_erase(lfs2, dir->pair[1]);
+            if (err) {
+                if (err == LFS2_ERR_CORRUPT) {
+                    goto relocate;
+                }
+                return err;
+            }
+
+            // write out header
+            dir->rev = lfs2_tole32(dir->rev);
+            err = lfs2_dir_commitprog(lfs2, &commit,
+                    &dir->rev, sizeof(dir->rev));
+            dir->rev = lfs2_fromle32(dir->rev);
+            if (err) {
+                if (err == LFS2_ERR_CORRUPT) {
+                    goto relocate;
+                }
+                return err;
+            }
+
+            // traverse the directory, this time writing out all unique tags
+            err = lfs2_dir_traverse(lfs2,
+                    source, 0, 0xffffffff, attrs, attrcount,
+                    LFS2_MKTAG(0x400, 0x3ff, 0),
+                    LFS2_MKTAG(LFS2_TYPE_NAME, 0, 0),
+                    begin, end, -begin,
+                    lfs2_dir_commit_commit, &(struct lfs2_dir_commit_commit){
+                        lfs2, &commit});
+            if (err) {
+                if (err == LFS2_ERR_CORRUPT) {
+                    goto relocate;
+                }
+                return err;
+            }
+
+            // commit tail, which may be new after last size check
+            if (!lfs2_pair_isnull(dir->tail)) {
+                lfs2_pair_tole32(dir->tail);
+                err = lfs2_dir_commitattr(lfs2, &commit,
+                        LFS2_MKTAG(LFS2_TYPE_TAIL + dir->split, 0x3ff, 8),
+                        dir->tail);
+                lfs2_pair_fromle32(dir->tail);
+                if (err) {
+                    if (err == LFS2_ERR_CORRUPT) {
+                        goto relocate;
+                    }
+                    return err;
+                }
+            }
+
+            // bring over gstate?
+            lfs2_gstate_t delta = {0};
+            if (!relocated) {
+                lfs2_gstate_xor(&delta, &lfs2->gdisk);
+                lfs2_gstate_xor(&delta, &lfs2->gstate);
+            }
+            lfs2_gstate_xor(&delta, &lfs2->gdelta);
+            delta.tag &= ~LFS2_MKTAG(0, 0, 0x3ff);
+
+            err = lfs2_dir_getgstate(lfs2, dir, &delta);
+            if (err) {
+                return err;
+            }
+
+            if (!lfs2_gstate_iszero(&delta)) {
+                lfs2_gstate_tole32(&delta);
+                err = lfs2_dir_commitattr(lfs2, &commit,
+                        LFS2_MKTAG(LFS2_TYPE_MOVESTATE, 0x3ff,
+                            sizeof(delta)), &delta);
+                if (err) {
+                    if (err == LFS2_ERR_CORRUPT) {
+                        goto relocate;
+                    }
+                    return err;
+                }
+            }
+
+            // complete commit with crc
+            err = lfs2_dir_commitcrc(lfs2, &commit);
+            if (err) {
+                if (err == LFS2_ERR_CORRUPT) {
+                    goto relocate;
+                }
+                return err;
+            }
+
+            // successful compaction, swap dir pair to indicate most recent
+            LFS2_ASSERT(commit.off % lfs2->cfg->prog_size == 0);
+            lfs2_pair_swap(dir->pair);
+            dir->count = end - begin;
+            dir->off = commit.off;
+            dir->etag = commit.ptag;
+            // update gstate
+            lfs2->gdelta = (lfs2_gstate_t){0};
+            if (!relocated) {
+                lfs2->gdisk = lfs2->gstate;
+            }
+        }
+        break;
+
+relocate:
+        // commit was corrupted, drop caches and prepare to relocate block
+        relocated = true;
+        lfs2_cache_drop(lfs2, &lfs2->pcache);
+        if (!tired) {
+            LFS2_DEBUG("Bad block at 0x%"PRIx32, dir->pair[1]);
+        }
+
+        // can't relocate superblock, filesystem is now frozen
+        if (lfs2_pair_cmp(dir->pair, (const lfs2_block_t[2]){0, 1}) == 0) {
+            LFS2_WARN("Superblock 0x%"PRIx32" has become unwritable",
+                    dir->pair[1]);
+            return LFS2_ERR_NOSPC;
+        }
+
+        // relocate half of pair
+        int err = lfs2_alloc(lfs2, &dir->pair[1]);
+        if (err && (err != LFS2_ERR_NOSPC || !tired)) {
+            return err;
+        }
+
+        tired = false;
+        continue;
+    }
+
+    if (relocated) {
+        // update references if we relocated
+        LFS2_DEBUG("Relocating {0x%"PRIx32", 0x%"PRIx32"} "
+                    "-> {0x%"PRIx32", 0x%"PRIx32"}",
+                oldpair[0], oldpair[1], dir->pair[0], dir->pair[1]);
+        int err = lfs2_fs_relocate(lfs2, oldpair, dir->pair);
+        if (err) {
+            return err;
+        }
+    }
+
+    return 0;
+}
+#endif
+
+#ifndef LFS2_READONLY
+static int lfs2_dir_commit(lfs2_t *lfs2, lfs2_mdir_t *dir,
+        const struct lfs2_mattr *attrs, int attrcount) {
+    // check for any inline files that aren't RAM backed and
+    // forcefully evict them, needed for filesystem consistency
+    for (lfs2_file_t *f = (lfs2_file_t*)lfs2->mlist; f; f = f->next) {
+        if (dir != &f->m && lfs2_pair_cmp(f->m.pair, dir->pair) == 0 &&
+                f->type == LFS2_TYPE_REG && (f->flags & LFS2_F_INLINE) &&
+                f->ctz.size > lfs2->cfg->cache_size) {
+            int err = lfs2_file_outline(lfs2, f);
+            if (err) {
+                return err;
+            }
+
+            err = lfs2_file_flush(lfs2, f);
+            if (err) {
+                return err;
+            }
+        }
+    }
+
+    // calculate changes to the directory
+    lfs2_mdir_t olddir = *dir;
+    bool hasdelete = false;
+    for (int i = 0; i < attrcount; i++) {
+        if (lfs2_tag_type3(attrs[i].tag) == LFS2_TYPE_CREATE) {
+            dir->count += 1;
+        } else if (lfs2_tag_type3(attrs[i].tag) == LFS2_TYPE_DELETE) {
+            LFS2_ASSERT(dir->count > 0);
+            dir->count -= 1;
+            hasdelete = true;
+        } else if (lfs2_tag_type1(attrs[i].tag) == LFS2_TYPE_TAIL) {
+            dir->tail[0] = ((lfs2_block_t*)attrs[i].buffer)[0];
+            dir->tail[1] = ((lfs2_block_t*)attrs[i].buffer)[1];
+            dir->split = (lfs2_tag_chunk(attrs[i].tag) & 1);
+            lfs2_pair_fromle32(dir->tail);
+        }
+    }
+
+    // should we actually drop the directory block?
+    if (hasdelete && dir->count == 0) {
+        lfs2_mdir_t pdir;
+        int err = lfs2_fs_pred(lfs2, dir->pair, &pdir);
+        if (err && err != LFS2_ERR_NOENT) {
+            *dir = olddir;
+            return err;
+        }
+
+        if (err != LFS2_ERR_NOENT && pdir.split) {
+            err = lfs2_dir_drop(lfs2, &pdir, dir);
+            if (err) {
+                *dir = olddir;
+                return err;
+            }
+        }
+    }
+
+    if (dir->erased || dir->count >= 0xff) {
+        // try to commit
+        struct lfs2_commit commit = {
+            .block = dir->pair[0],
+            .off = dir->off,
+            .ptag = dir->etag,
+            .crc = 0xffffffff,
+
+            .begin = dir->off,
+            .end = lfs2->cfg->block_size - 8,
+        };
+
+        // traverse attrs that need to be written out
+        lfs2_pair_tole32(dir->tail);
+        int err = lfs2_dir_traverse(lfs2,
+                dir, dir->off, dir->etag, attrs, attrcount,
+                0, 0, 0, 0, 0,
+                lfs2_dir_commit_commit, &(struct lfs2_dir_commit_commit){
+                    lfs2, &commit});
+        lfs2_pair_fromle32(dir->tail);
+        if (err) {
+            if (err == LFS2_ERR_NOSPC || err == LFS2_ERR_CORRUPT) {
+                goto compact;
+            }
+            *dir = olddir;
+            return err;
+        }
+
+        // commit any global diffs if we have any
+        lfs2_gstate_t delta = {0};
+        lfs2_gstate_xor(&delta, &lfs2->gstate);
+        lfs2_gstate_xor(&delta, &lfs2->gdisk);
+        lfs2_gstate_xor(&delta, &lfs2->gdelta);
+        delta.tag &= ~LFS2_MKTAG(0, 0, 0x3ff);
+        if (!lfs2_gstate_iszero(&delta)) {
+            err = lfs2_dir_getgstate(lfs2, dir, &delta);
+            if (err) {
+                *dir = olddir;
+                return err;
+            }
+
+            lfs2_gstate_tole32(&delta);
+            err = lfs2_dir_commitattr(lfs2, &commit,
+                    LFS2_MKTAG(LFS2_TYPE_MOVESTATE, 0x3ff,
+                        sizeof(delta)), &delta);
+            if (err) {
+                if (err == LFS2_ERR_NOSPC || err == LFS2_ERR_CORRUPT) {
+                    goto compact;
+                }
+                *dir = olddir;
+                return err;
+            }
+        }
+
+        // finalize commit with the crc
+        err = lfs2_dir_commitcrc(lfs2, &commit);
+        if (err) {
+            if (err == LFS2_ERR_NOSPC || err == LFS2_ERR_CORRUPT) {
+                goto compact;
+            }
+            *dir = olddir;
+            return err;
+        }
+
+        // successful commit, update dir
+        LFS2_ASSERT(commit.off % lfs2->cfg->prog_size == 0);
+        dir->off = commit.off;
+        dir->etag = commit.ptag;
+        // and update gstate
+        lfs2->gdisk = lfs2->gstate;
+        lfs2->gdelta = (lfs2_gstate_t){0};
+    } else {
+compact:
+        // fall back to compaction
+        lfs2_cache_drop(lfs2, &lfs2->pcache);
+
+        int err = lfs2_dir_compact(lfs2, dir, attrs, attrcount,
+                dir, 0, dir->count);
+        if (err) {
+            *dir = olddir;
+            return err;
+        }
+    }
+
+    // this complicated bit of logic is for fixing up any active
+    // metadata-pairs that we may have affected
+    //
+    // note we have to make two passes since the mdir passed to
+    // lfs2_dir_commit could also be in this list, and even then
+    // we need to copy the pair so they don't get clobbered if we refetch
+    // our mdir.
+    for (struct lfs2_mlist *d = lfs2->mlist; d; d = d->next) {
+        if (&d->m != dir && lfs2_pair_cmp(d->m.pair, olddir.pair) == 0) {
+            d->m = *dir;
+            for (int i = 0; i < attrcount; i++) {
+                if (lfs2_tag_type3(attrs[i].tag) == LFS2_TYPE_DELETE &&
+                        d->id == lfs2_tag_id(attrs[i].tag)) {
+                    d->m.pair[0] = LFS2_BLOCK_NULL;
+                    d->m.pair[1] = LFS2_BLOCK_NULL;
+                } else if (lfs2_tag_type3(attrs[i].tag) == LFS2_TYPE_DELETE &&
+                        d->id > lfs2_tag_id(attrs[i].tag)) {
+                    d->id -= 1;
+                    if (d->type == LFS2_TYPE_DIR) {
+                        ((lfs2_dir_t*)d)->pos -= 1;
+                    }
+                } else if (lfs2_tag_type3(attrs[i].tag) == LFS2_TYPE_CREATE &&
+                        d->id >= lfs2_tag_id(attrs[i].tag)) {
+                    d->id += 1;
+                    if (d->type == LFS2_TYPE_DIR) {
+                        ((lfs2_dir_t*)d)->pos += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    for (struct lfs2_mlist *d = lfs2->mlist; d; d = d->next) {
+        if (lfs2_pair_cmp(d->m.pair, olddir.pair) == 0) {
+            while (d->id >= d->m.count && d->m.split) {
+                // we split and id is on tail now
+                d->id -= d->m.count;
+                int err = lfs2_dir_fetch(lfs2, &d->m, d->m.tail);
+                if (err) {
+                    return err;
+                }
+            }
+        }
+    }
+
+    return 0;
+}
+#endif
+
+
+/// Top level directory operations ///
+#ifndef LFS2_READONLY
+static int lfs2_rawmkdir(lfs2_t *lfs2, const char *path) {
+    // deorphan if we haven't yet, needed at most once after poweron
+    int err = lfs2_fs_forceconsistency(lfs2);
+    if (err) {
+        return err;
+    }
+
+    struct lfs2_mlist cwd;
+    cwd.next = lfs2->mlist;
+    uint16_t id;
+    err = lfs2_dir_find(lfs2, &cwd.m, &path, &id);
+    if (!(err == LFS2_ERR_NOENT && id != 0x3ff)) {
+        return (err < 0) ? err : LFS2_ERR_EXIST;
+    }
+
+    // check that name fits
+    lfs2_size_t nlen = strlen(path);
+    if (nlen > lfs2->name_max) {
+        return LFS2_ERR_NAMETOOLONG;
+    }
+
+    // build up new directory
+    lfs2_alloc_ack(lfs2);
+    lfs2_mdir_t dir;
+    err = lfs2_dir_alloc(lfs2, &dir);
+    if (err) {
+        return err;
+    }
+
+    // find end of list
+    lfs2_mdir_t pred = cwd.m;
+    while (pred.split) {
+        err = lfs2_dir_fetch(lfs2, &pred, pred.tail);
+        if (err) {
+            return err;
+        }
+    }
+
+    // setup dir
+    lfs2_pair_tole32(pred.tail);
+    err = lfs2_dir_commit(lfs2, &dir, LFS2_MKATTRS(
+            {LFS2_MKTAG(LFS2_TYPE_SOFTTAIL, 0x3ff, 8), pred.tail}));
+    lfs2_pair_fromle32(pred.tail);
+    if (err) {
+        return err;
+    }
+
+    // current block end of list?
+    if (cwd.m.split) {
+        // update tails, this creates a desync
+        lfs2_fs_preporphans(lfs2, +1);
+
+        // it's possible our predecessor has to be relocated, and if
+        // our parent is our predecessor's predecessor, this could have
+        // caused our parent to go out of date, fortunately we can hook
+        // ourselves into littlefs to catch this
+        cwd.type = 0;
+        cwd.id = 0;
+        lfs2->mlist = &cwd;
+
+        lfs2_pair_tole32(dir.pair);
+        err = lfs2_dir_commit(lfs2, &pred, LFS2_MKATTRS(
+                {LFS2_MKTAG(LFS2_TYPE_SOFTTAIL, 0x3ff, 8), dir.pair}));
+        lfs2_pair_fromle32(dir.pair);
+        if (err) {
+            lfs2->mlist = cwd.next;
+            return err;
+        }
+
+        lfs2->mlist = cwd.next;
+        lfs2_fs_preporphans(lfs2, -1);
+    }
+
+    // now insert into our parent block
+    lfs2_pair_tole32(dir.pair);
+    err = lfs2_dir_commit(lfs2, &cwd.m, LFS2_MKATTRS(
+            {LFS2_MKTAG(LFS2_TYPE_CREATE, id, 0), NULL},
+            {LFS2_MKTAG(LFS2_TYPE_DIR, id, nlen), path},
+            {LFS2_MKTAG(LFS2_TYPE_DIRSTRUCT, id, 8), dir.pair},
+            {LFS2_MKTAG_IF(!cwd.m.split,
+                LFS2_TYPE_SOFTTAIL, 0x3ff, 8), dir.pair}));
+    lfs2_pair_fromle32(dir.pair);
+    if (err) {
+        return err;
+    }
+
+    return 0;
+}
+#endif
+
+static int lfs2_dir_rawopen(lfs2_t *lfs2, lfs2_dir_t *dir, const char *path) {
+    lfs2_stag_t tag = lfs2_dir_find(lfs2, &dir->m, &path, NULL);
+    if (tag < 0) {
+        return tag;
+    }
+
+    if (lfs2_tag_type3(tag) != LFS2_TYPE_DIR) {
+        return LFS2_ERR_NOTDIR;
+    }
+
+    lfs2_block_t pair[2];
+    if (lfs2_tag_id(tag) == 0x3ff) {
+        // handle root dir separately
+        pair[0] = lfs2->root[0];
+        pair[1] = lfs2->root[1];
+    } else {
+        // get dir pair from parent
+        lfs2_stag_t res = lfs2_dir_get(lfs2, &dir->m, LFS2_MKTAG(0x700, 0x3ff, 0),
+                LFS2_MKTAG(LFS2_TYPE_STRUCT, lfs2_tag_id(tag), 8), pair);
+        if (res < 0) {
+            return res;
+        }
+        lfs2_pair_fromle32(pair);
+    }
+
+    // fetch first pair
+    int err = lfs2_dir_fetch(lfs2, &dir->m, pair);
+    if (err) {
+        return err;
+    }
+
+    // setup entry
+    dir->head[0] = dir->m.pair[0];
+    dir->head[1] = dir->m.pair[1];
+    dir->id = 0;
+    dir->pos = 0;
+
+    // add to list of mdirs
+    dir->type = LFS2_TYPE_DIR;
+    lfs2_mlist_append(lfs2, (struct lfs2_mlist *)dir);
+
+    return 0;
+}
+
+static int lfs2_dir_rawclose(lfs2_t *lfs2, lfs2_dir_t *dir) {
+    // remove from list of mdirs
+    lfs2_mlist_remove(lfs2, (struct lfs2_mlist *)dir);
+
+    return 0;
+}
+
+static int lfs2_dir_rawread(lfs2_t *lfs2, lfs2_dir_t *dir, struct lfs2_info *info) {
+    memset(info, 0, sizeof(*info));
+
+    // special offset for '.' and '..'
+    if (dir->pos == 0) {
+        info->type = LFS2_TYPE_DIR;
+        strcpy(info->name, ".");
+        dir->pos += 1;
+        return true;
+    } else if (dir->pos == 1) {
+        info->type = LFS2_TYPE_DIR;
+        strcpy(info->name, "..");
+        dir->pos += 1;
+        return true;
+    }
+
+    while (true) {
+        if (dir->id == dir->m.count) {
+            if (!dir->m.split) {
+                return false;
+            }
+
+            int err = lfs2_dir_fetch(lfs2, &dir->m, dir->m.tail);
+            if (err) {
+                return err;
+            }
+
+            dir->id = 0;
+        }
+
+        int err = lfs2_dir_getinfo(lfs2, &dir->m, dir->id, info);
+        if (err && err != LFS2_ERR_NOENT) {
+            return err;
+        }
+
+        dir->id += 1;
+        if (err != LFS2_ERR_NOENT) {
+            break;
+        }
+    }
+
+    dir->pos += 1;
+    return true;
+}
+
+static int lfs2_dir_rawseek(lfs2_t *lfs2, lfs2_dir_t *dir, lfs2_off_t off) {
+    // simply walk from head dir
+    int err = lfs2_dir_rawrewind(lfs2, dir);
+    if (err) {
+        return err;
+    }
+
+    // first two for ./..
+    dir->pos = lfs2_min(2, off);
+    off -= dir->pos;
+
+    // skip superblock entry
+    dir->id = (off > 0 && lfs2_pair_cmp(dir->head, lfs2->root) == 0);
+
+    while (off > 0) {
+        int diff = lfs2_min(dir->m.count - dir->id, off);
+        dir->id += diff;
+        dir->pos += diff;
+        off -= diff;
+
+        if (dir->id == dir->m.count) {
+            if (!dir->m.split) {
+                return LFS2_ERR_INVAL;
+            }
+
+            err = lfs2_dir_fetch(lfs2, &dir->m, dir->m.tail);
+            if (err) {
+                return err;
+            }
+
+            dir->id = 0;
+        }
+    }
+
+    return 0;
+}
+
+static lfs2_soff_t lfs2_dir_rawtell(lfs2_t *lfs2, lfs2_dir_t *dir) {
+    (void)lfs2;
+    return dir->pos;
+}
+
+static int lfs2_dir_rawrewind(lfs2_t *lfs2, lfs2_dir_t *dir) {
+    // reload the head dir
+    int err = lfs2_dir_fetch(lfs2, &dir->m, dir->head);
+    if (err) {
+        return err;
+    }
+
+    dir->id = 0;
+    dir->pos = 0;
+    return 0;
+}
+
+
+/// File index list operations ///
+static int lfs2_ctz_index(lfs2_t *lfs2, lfs2_off_t *off) {
+    lfs2_off_t size = *off;
+    lfs2_off_t b = lfs2->cfg->block_size - 2*4;
+    lfs2_off_t i = size / b;
+    if (i == 0) {
+        return 0;
+    }
+
+    i = (size - 4*(lfs2_popc(i-1)+2)) / b;
+    *off = size - b*i - 4*lfs2_popc(i);
+    return i;
+}
+
+static int lfs2_ctz_find(lfs2_t *lfs2,
+        const lfs2_cache_t *pcache, lfs2_cache_t *rcache,
+        lfs2_block_t head, lfs2_size_t size,
+        lfs2_size_t pos, lfs2_block_t *block, lfs2_off_t *off) {
+    if (size == 0) {
+        *block = LFS2_BLOCK_NULL;
+        *off = 0;
+        return 0;
+    }
+
+    lfs2_off_t current = lfs2_ctz_index(lfs2, &(lfs2_off_t){size-1});
+    lfs2_off_t target = lfs2_ctz_index(lfs2, &pos);
+
+    while (current > target) {
+        lfs2_size_t skip = lfs2_min(
+                lfs2_npw2(current-target+1) - 1,
+                lfs2_ctz(current));
+
+        int err = lfs2_bd_read(lfs2,
+                pcache, rcache, sizeof(head),
+                head, 4*skip, &head, sizeof(head));
+        head = lfs2_fromle32(head);
+        if (err) {
+            return err;
+        }
+
+        current -= 1 << skip;
+    }
+
+    *block = head;
+    *off = pos;
+    return 0;
+}
+
+#ifndef LFS2_READONLY
+static int lfs2_ctz_extend(lfs2_t *lfs2,
+        lfs2_cache_t *pcache, lfs2_cache_t *rcache,
+        lfs2_block_t head, lfs2_size_t size,
+        lfs2_block_t *block, lfs2_off_t *off) {
+    while (true) {
+        // go ahead and grab a block
+        lfs2_block_t nblock;
+        int err = lfs2_alloc(lfs2, &nblock);
+        if (err) {
+            return err;
+        }
+
+        {
+            err = lfs2_bd_erase(lfs2, nblock);
+            if (err) {
+                if (err == LFS2_ERR_CORRUPT) {
+                    goto relocate;
+                }
+                return err;
+            }
+
+            if (size == 0) {
+                *block = nblock;
+                *off = 0;
+                return 0;
+            }
+
+            lfs2_size_t noff = size - 1;
+            lfs2_off_t index = lfs2_ctz_index(lfs2, &noff);
+            noff = noff + 1;
+
+            // just copy out the last block if it is incomplete
+            if (noff != lfs2->cfg->block_size) {
+                for (lfs2_off_t i = 0; i < noff; i++) {
+                    uint8_t data;
+                    err = lfs2_bd_read(lfs2,
+                            NULL, rcache, noff-i,
+                            head, i, &data, 1);
+                    if (err) {
+                        return err;
+                    }
+
+                    err = lfs2_bd_prog(lfs2,
+                            pcache, rcache, true,
+                            nblock, i, &data, 1);
+                    if (err) {
+                        if (err == LFS2_ERR_CORRUPT) {
+                            goto relocate;
+                        }
+                        return err;
+                    }
+                }
+
+                *block = nblock;
+                *off = noff;
+                return 0;
+            }
+
+            // append block
+            index += 1;
+            lfs2_size_t skips = lfs2_ctz(index) + 1;
+            lfs2_block_t nhead = head;
+            for (lfs2_off_t i = 0; i < skips; i++) {
+                nhead = lfs2_tole32(nhead);
+                err = lfs2_bd_prog(lfs2, pcache, rcache, true,
+                        nblock, 4*i, &nhead, 4);
+                nhead = lfs2_fromle32(nhead);
+                if (err) {
+                    if (err == LFS2_ERR_CORRUPT) {
+                        goto relocate;
+                    }
+                    return err;
+                }
+
+                if (i != skips-1) {
+                    err = lfs2_bd_read(lfs2,
+                            NULL, rcache, sizeof(nhead),
+                            nhead, 4*i, &nhead, sizeof(nhead));
+                    nhead = lfs2_fromle32(nhead);
+                    if (err) {
+                        return err;
+                    }
+                }
+            }
+
+            *block = nblock;
+            *off = 4*skips;
+            return 0;
+        }
+
+relocate:
+        LFS2_DEBUG("Bad block at 0x%"PRIx32, nblock);
+
+        // just clear cache and try a new block
+        lfs2_cache_drop(lfs2, pcache);
+    }
+}
+#endif
+
+static int lfs2_ctz_traverse(lfs2_t *lfs2,
+        const lfs2_cache_t *pcache, lfs2_cache_t *rcache,
+        lfs2_block_t head, lfs2_size_t size,
+        int (*cb)(void*, lfs2_block_t), void *data) {
+    if (size == 0) {
+        return 0;
+    }
+
+    lfs2_off_t index = lfs2_ctz_index(lfs2, &(lfs2_off_t){size-1});
+
+    while (true) {
+        int err = cb(data, head);
+        if (err) {
+            return err;
+        }
+
+        if (index == 0) {
+            return 0;
+        }
+
+        lfs2_block_t heads[2];
+        int count = 2 - (index & 1);
+        err = lfs2_bd_read(lfs2,
+                pcache, rcache, count*sizeof(head),
+                head, 0, &heads, count*sizeof(head));
+        heads[0] = lfs2_fromle32(heads[0]);
+        heads[1] = lfs2_fromle32(heads[1]);
+        if (err) {
+            return err;
+        }
+
+        for (int i = 0; i < count-1; i++) {
+            err = cb(data, heads[i]);
+            if (err) {
+                return err;
+            }
+        }
+
+        head = heads[count-1];
+        index -= count;
+    }
+}
+
+
+/// Top level file operations ///
+static int lfs2_file_rawopencfg(lfs2_t *lfs2, lfs2_file_t *file,
+        const char *path, int flags,
+        const struct lfs2_file_config *cfg) {
+#ifndef LFS2_READONLY
+    // deorphan if we haven't yet, needed at most once after poweron
+    if ((flags & LFS2_O_WRONLY) == LFS2_O_WRONLY) {
+        int err = lfs2_fs_forceconsistency(lfs2);
+        if (err) {
+            return err;
+        }
+    }
+#else
+    LFS2_ASSERT((flags & LFS2_O_RDONLY) == LFS2_O_RDONLY);
+#endif
+
+    // setup simple file details
+    int err;
+    file->cfg = cfg;
+    file->flags = flags;
+    file->pos = 0;
+    file->off = 0;
+    file->cache.buffer = NULL;
+
+    // allocate entry for file if it doesn't exist
+    lfs2_stag_t tag = lfs2_dir_find(lfs2, &file->m, &path, &file->id);
+    if (tag < 0 && !(tag == LFS2_ERR_NOENT && file->id != 0x3ff)) {
+        err = tag;
+        goto cleanup;
+    }
+
+    // get id, add to list of mdirs to catch update changes
+    file->type = LFS2_TYPE_REG;
+    lfs2_mlist_append(lfs2, (struct lfs2_mlist *)file);
+
+#ifdef LFS2_READONLY
+    if (tag == LFS2_ERR_NOENT) {
+        err = LFS2_ERR_NOENT;
+        goto cleanup;
+#else
+    if (tag == LFS2_ERR_NOENT) {
+        if (!(flags & LFS2_O_CREAT)) {
+            err = LFS2_ERR_NOENT;
+            goto cleanup;
+        }
+
+        // check that name fits
+        lfs2_size_t nlen = strlen(path);
+        if (nlen > lfs2->name_max) {
+            err = LFS2_ERR_NAMETOOLONG;
+            goto cleanup;
+        }
+
+        // get next slot and create entry to remember name
+        err = lfs2_dir_commit(lfs2, &file->m, LFS2_MKATTRS(
+                {LFS2_MKTAG(LFS2_TYPE_CREATE, file->id, 0), NULL},
+                {LFS2_MKTAG(LFS2_TYPE_REG, file->id, nlen), path},
+                {LFS2_MKTAG(LFS2_TYPE_INLINESTRUCT, file->id, 0), NULL}));
+        if (err) {
+            err = LFS2_ERR_NAMETOOLONG;
+            goto cleanup;
+        }
+
+        tag = LFS2_MKTAG(LFS2_TYPE_INLINESTRUCT, 0, 0);
+    } else if (flags & LFS2_O_EXCL) {
+        err = LFS2_ERR_EXIST;
+        goto cleanup;
+#endif
+    } else if (lfs2_tag_type3(tag) != LFS2_TYPE_REG) {
+        err = LFS2_ERR_ISDIR;
+        goto cleanup;
+#ifndef LFS2_READONLY
+    } else if (flags & LFS2_O_TRUNC) {
+        // truncate if requested
+        tag = LFS2_MKTAG(LFS2_TYPE_INLINESTRUCT, file->id, 0);
+        file->flags |= LFS2_F_DIRTY;
+#endif
+    } else {
+        // try to load what's on disk, if it's inlined we'll fix it later
+        tag = lfs2_dir_get(lfs2, &file->m, LFS2_MKTAG(0x700, 0x3ff, 0),
+                LFS2_MKTAG(LFS2_TYPE_STRUCT, file->id, 8), &file->ctz);
+        if (tag < 0) {
+            err = tag;
+            goto cleanup;
+        }
+        lfs2_ctz_fromle32(&file->ctz);
+    }
+
+    // fetch attrs
+    for (unsigned i = 0; i < file->cfg->attr_count; i++) {
+        // if opened for read / read-write operations
+        if ((file->flags & LFS2_O_RDONLY) == LFS2_O_RDONLY) {
+            lfs2_stag_t res = lfs2_dir_get(lfs2, &file->m,
+                    LFS2_MKTAG(0x7ff, 0x3ff, 0),
+                    LFS2_MKTAG(LFS2_TYPE_USERATTR + file->cfg->attrs[i].type,
+                        file->id, file->cfg->attrs[i].size),
+                        file->cfg->attrs[i].buffer);
+            if (res < 0 && res != LFS2_ERR_NOENT) {
+                err = res;
+                goto cleanup;
+            }
+        }
+
+#ifndef LFS2_READONLY
+        // if opened for write / read-write operations
+        if ((file->flags & LFS2_O_WRONLY) == LFS2_O_WRONLY) {
+            if (file->cfg->attrs[i].size > lfs2->attr_max) {
+                err = LFS2_ERR_NOSPC;
+                goto cleanup;
+            }
+
+            file->flags |= LFS2_F_DIRTY;
+        }
+#endif
+    }
+
+    // allocate buffer if needed
+    if (file->cfg->buffer) {
+        file->cache.buffer = file->cfg->buffer;
+    } else {
+        file->cache.buffer = lfs2_malloc(lfs2->cfg->cache_size);
+        if (!file->cache.buffer) {
+            err = LFS2_ERR_NOMEM;
+            goto cleanup;
+        }
+    }
+
+    // zero to avoid information leak
+    lfs2_cache_zero(lfs2, &file->cache);
+
+    if (lfs2_tag_type3(tag) == LFS2_TYPE_INLINESTRUCT) {
+        // load inline files
+        file->ctz.head = LFS2_BLOCK_INLINE;
+        file->ctz.size = lfs2_tag_size(tag);
+        file->flags |= LFS2_F_INLINE;
+        file->cache.block = file->ctz.head;
+        file->cache.off = 0;
+        file->cache.size = lfs2->cfg->cache_size;
+
+        // don't always read (may be new/trunc file)
+        if (file->ctz.size > 0) {
+            lfs2_stag_t res = lfs2_dir_get(lfs2, &file->m,
+                    LFS2_MKTAG(0x700, 0x3ff, 0),
+                    LFS2_MKTAG(LFS2_TYPE_STRUCT, file->id,
+                        lfs2_min(file->cache.size, 0x3fe)),
+                    file->cache.buffer);
+            if (res < 0) {
+                err = res;
+                goto cleanup;
+            }
+        }
+    }
+
+    return 0;
+
+cleanup:
+    // clean up lingering resources
+#ifndef LFS2_READONLY
+    file->flags |= LFS2_F_ERRED;
+#endif
+    lfs2_file_rawclose(lfs2, file);
+    return err;
+}
+
+static int lfs2_file_rawopen(lfs2_t *lfs2, lfs2_file_t *file,
+        const char *path, int flags) {
+    static const struct lfs2_file_config defaults = {0};
+    int err = lfs2_file_rawopencfg(lfs2, file, path, flags, &defaults);
+    return err;
+}
+
+static int lfs2_file_rawclose(lfs2_t *lfs2, lfs2_file_t *file) {
+#ifndef LFS2_READONLY
+    int err = lfs2_file_rawsync(lfs2, file);
+#else
+    int err = 0;
+#endif
+
+    // remove from list of mdirs
+    lfs2_mlist_remove(lfs2, (struct lfs2_mlist*)file);
+
+    // clean up memory
+    if (!file->cfg->buffer) {
+        lfs2_free(file->cache.buffer);
+    }
+
+    return err;
+}
+
+
+#ifndef LFS2_READONLY
+static int lfs2_file_relocate(lfs2_t *lfs2, lfs2_file_t *file) {
+    while (true) {
+        // just relocate what exists into new block
+        lfs2_block_t nblock;
+        int err = lfs2_alloc(lfs2, &nblock);
+        if (err) {
+            return err;
+        }
+
+        err = lfs2_bd_erase(lfs2, nblock);
+        if (err) {
+            if (err == LFS2_ERR_CORRUPT) {
+                goto relocate;
+            }
+            return err;
+        }
+
+        // either read from dirty cache or disk
+        for (lfs2_off_t i = 0; i < file->off; i++) {
+            uint8_t data;
+            if (file->flags & LFS2_F_INLINE) {
+                err = lfs2_dir_getread(lfs2, &file->m,
+                        // note we evict inline files before they can be dirty
+                        NULL, &file->cache, file->off-i,
+                        LFS2_MKTAG(0xfff, 0x1ff, 0),
+                        LFS2_MKTAG(LFS2_TYPE_INLINESTRUCT, file->id, 0),
+                        i, &data, 1);
+                if (err) {
+                    return err;
+                }
+            } else {
+                err = lfs2_bd_read(lfs2,
+                        &file->cache, &lfs2->rcache, file->off-i,
+                        file->block, i, &data, 1);
+                if (err) {
+                    return err;
+                }
+            }
+
+            err = lfs2_bd_prog(lfs2,
+                    &lfs2->pcache, &lfs2->rcache, true,
+                    nblock, i, &data, 1);
+            if (err) {
+                if (err == LFS2_ERR_CORRUPT) {
+                    goto relocate;
+                }
+                return err;
+            }
+        }
+
+        // copy over new state of file
+        memcpy(file->cache.buffer, lfs2->pcache.buffer, lfs2->cfg->cache_size);
+        file->cache.block = lfs2->pcache.block;
+        file->cache.off = lfs2->pcache.off;
+        file->cache.size = lfs2->pcache.size;
+        lfs2_cache_zero(lfs2, &lfs2->pcache);
+
+        file->block = nblock;
+        file->flags |= LFS2_F_WRITING;
+        return 0;
+
+relocate:
+        LFS2_DEBUG("Bad block at 0x%"PRIx32, nblock);
+
+        // just clear cache and try a new block
+        lfs2_cache_drop(lfs2, &lfs2->pcache);
+    }
+}
+#endif
+
+#ifndef LFS2_READONLY
+static int lfs2_file_outline(lfs2_t *lfs2, lfs2_file_t *file) {
+    file->off = file->pos;
+    lfs2_alloc_ack(lfs2);
+    int err = lfs2_file_relocate(lfs2, file);
+    if (err) {
+        return err;
+    }
+
+    file->flags &= ~LFS2_F_INLINE;
+    return 0;
+}
+#endif
+
+#ifndef LFS2_READONLY
+static int lfs2_file_flush(lfs2_t *lfs2, lfs2_file_t *file) {
+    if (file->flags & LFS2_F_READING) {
+        if (!(file->flags & LFS2_F_INLINE)) {
+            lfs2_cache_drop(lfs2, &file->cache);
+        }
+        file->flags &= ~LFS2_F_READING;
+    }
+
+    if (file->flags & LFS2_F_WRITING) {
+        lfs2_off_t pos = file->pos;
+
+        if (!(file->flags & LFS2_F_INLINE)) {
+            // copy over anything after current branch
+            lfs2_file_t orig = {
+                .ctz.head = file->ctz.head,
+                .ctz.size = file->ctz.size,
+                .flags = LFS2_O_RDONLY,
+                .pos = file->pos,
+                .cache = lfs2->rcache,
+            };
+            lfs2_cache_drop(lfs2, &lfs2->rcache);
+
+            while (file->pos < file->ctz.size) {
+                // copy over a byte at a time, leave it up to caching
+                // to make this efficient
+                uint8_t data;
+                lfs2_ssize_t res = lfs2_file_rawread(lfs2, &orig, &data, 1);
+                if (res < 0) {
+                    return res;
+                }
+
+                res = lfs2_file_rawwrite(lfs2, file, &data, 1);
+                if (res < 0) {
+                    return res;
+                }
+
+                // keep our reference to the rcache in sync
+                if (lfs2->rcache.block != LFS2_BLOCK_NULL) {
+                    lfs2_cache_drop(lfs2, &orig.cache);
+                    lfs2_cache_drop(lfs2, &lfs2->rcache);
+                }
+            }
+
+            // write out what we have
+            while (true) {
+                int err = lfs2_bd_flush(lfs2, &file->cache, &lfs2->rcache, true);
+                if (err) {
+                    if (err == LFS2_ERR_CORRUPT) {
+                        goto relocate;
+                    }
+                    return err;
+                }
+
+                break;
+
+relocate:
+                LFS2_DEBUG("Bad block at 0x%"PRIx32, file->block);
+                err = lfs2_file_relocate(lfs2, file);
+                if (err) {
+                    return err;
+                }
+            }
+        } else {
+            file->pos = lfs2_max(file->pos, file->ctz.size);
+        }
+
+        // actual file updates
+        file->ctz.head = file->block;
+        file->ctz.size = file->pos;
+        file->flags &= ~LFS2_F_WRITING;
+        file->flags |= LFS2_F_DIRTY;
+
+        file->pos = pos;
+    }
+
+    return 0;
+}
+#endif
+
+#ifndef LFS2_READONLY
+static int lfs2_file_rawsync(lfs2_t *lfs2, lfs2_file_t *file) {
+    if (file->flags & LFS2_F_ERRED) {
+        // it's not safe to do anything if our file errored
+        return 0;
+    }
+
+    int err = lfs2_file_flush(lfs2, file);
+    if (err) {
+        file->flags |= LFS2_F_ERRED;
+        return err;
+    }
+
+
+    if ((file->flags & LFS2_F_DIRTY) &&
+            !lfs2_pair_isnull(file->m.pair)) {
+        // update dir entry
+        uint16_t type;
+        const void *buffer;
+        lfs2_size_t size;
+        struct lfs2_ctz ctz;
+        if (file->flags & LFS2_F_INLINE) {
+            // inline the whole file
+            type = LFS2_TYPE_INLINESTRUCT;
+            buffer = file->cache.buffer;
+            size = file->ctz.size;
+        } else {
+            // update the ctz reference
+            type = LFS2_TYPE_CTZSTRUCT;
+            // copy ctz so alloc will work during a relocate
+            ctz = file->ctz;
+            lfs2_ctz_tole32(&ctz);
+            buffer = &ctz;
+            size = sizeof(ctz);
+        }
+
+        // commit file data and attributes
+        err = lfs2_dir_commit(lfs2, &file->m, LFS2_MKATTRS(
+                {LFS2_MKTAG(type, file->id, size), buffer},
+                {LFS2_MKTAG(LFS2_FROM_USERATTRS, file->id,
+                    file->cfg->attr_count), file->cfg->attrs}));
+        if (err) {
+            file->flags |= LFS2_F_ERRED;
+            return err;
+        }
+
+        file->flags &= ~LFS2_F_DIRTY;
+    }
+
+    return 0;
+}
+#endif
+
+static lfs2_ssize_t lfs2_file_rawread(lfs2_t *lfs2, lfs2_file_t *file,
+        void *buffer, lfs2_size_t size) {
+    LFS2_ASSERT((file->flags & LFS2_O_RDONLY) == LFS2_O_RDONLY);
+
+    uint8_t *data = buffer;
+    lfs2_size_t nsize = size;
+
+#ifndef LFS2_READONLY
+    if (file->flags & LFS2_F_WRITING) {
+        // flush out any writes
+        int err = lfs2_file_flush(lfs2, file);
+        if (err) {
+            return err;
+        }
+    }
+#endif
+
+    if (file->pos >= file->ctz.size) {
+        // eof if past end
+        return 0;
+    }
+
+    size = lfs2_min(size, file->ctz.size - file->pos);
+    nsize = size;
+
+    while (nsize > 0) {
+        // check if we need a new block
+        if (!(file->flags & LFS2_F_READING) ||
+                file->off == lfs2->cfg->block_size) {
+            if (!(file->flags & LFS2_F_INLINE)) {
+                int err = lfs2_ctz_find(lfs2, NULL, &file->cache,
+                        file->ctz.head, file->ctz.size,
+                        file->pos, &file->block, &file->off);
+                if (err) {
+                    return err;
+                }
+            } else {
+                file->block = LFS2_BLOCK_INLINE;
+                file->off = file->pos;
+            }
+
+            file->flags |= LFS2_F_READING;
+        }
+
+        // read as much as we can in current block
+        lfs2_size_t diff = lfs2_min(nsize, lfs2->cfg->block_size - file->off);
+        if (file->flags & LFS2_F_INLINE) {
+            int err = lfs2_dir_getread(lfs2, &file->m,
+                    NULL, &file->cache, lfs2->cfg->block_size,
+                    LFS2_MKTAG(0xfff, 0x1ff, 0),
+                    LFS2_MKTAG(LFS2_TYPE_INLINESTRUCT, file->id, 0),
+                    file->off, data, diff);
+            if (err) {
+                return err;
+            }
+        } else {
+            int err = lfs2_bd_read(lfs2,
+                    NULL, &file->cache, lfs2->cfg->block_size,
+                    file->block, file->off, data, diff);
+            if (err) {
+                return err;
+            }
+        }
+
+        file->pos += diff;
+        file->off += diff;
+        data += diff;
+        nsize -= diff;
+    }
+
+    return size;
+}
+
+#ifndef LFS2_READONLY
+static lfs2_ssize_t lfs2_file_rawwrite(lfs2_t *lfs2, lfs2_file_t *file,
+        const void *buffer, lfs2_size_t size) {
+    LFS2_ASSERT((file->flags & LFS2_O_WRONLY) == LFS2_O_WRONLY);
+
+    const uint8_t *data = buffer;
+    lfs2_size_t nsize = size;
+
+    if (file->flags & LFS2_F_READING) {
+        // drop any reads
+        int err = lfs2_file_flush(lfs2, file);
+        if (err) {
+            return err;
+        }
+    }
+
+    if ((file->flags & LFS2_O_APPEND) && file->pos < file->ctz.size) {
+        file->pos = file->ctz.size;
+    }
+
+    if (file->pos + size > lfs2->file_max) {
+        // Larger than file limit?
+        return LFS2_ERR_FBIG;
+    }
+
+    if (!(file->flags & LFS2_F_WRITING) && file->pos > file->ctz.size) {
+        // fill with zeros
+        lfs2_off_t pos = file->pos;
+        file->pos = file->ctz.size;
+
+        while (file->pos < pos) {
+            lfs2_ssize_t res = lfs2_file_rawwrite(lfs2, file, &(uint8_t){0}, 1);
+            if (res < 0) {
+                return res;
+            }
+        }
+    }
+
+    if ((file->flags & LFS2_F_INLINE) &&
+            lfs2_max(file->pos+nsize, file->ctz.size) >
+            lfs2_min(0x3fe, lfs2_min(
+                lfs2->cfg->cache_size, lfs2->cfg->block_size/8))) {
+        // inline file doesn't fit anymore
+        int err = lfs2_file_outline(lfs2, file);
+        if (err) {
+            file->flags |= LFS2_F_ERRED;
+            return err;
+        }
+    }
+
+    while (nsize > 0) {
+        // check if we need a new block
+        if (!(file->flags & LFS2_F_WRITING) ||
+                file->off == lfs2->cfg->block_size) {
+            if (!(file->flags & LFS2_F_INLINE)) {
+                if (!(file->flags & LFS2_F_WRITING) && file->pos > 0) {
+                    // find out which block we're extending from
+                    int err = lfs2_ctz_find(lfs2, NULL, &file->cache,
+                            file->ctz.head, file->ctz.size,
+                            file->pos-1, &file->block, &file->off);
+                    if (err) {
+                        file->flags |= LFS2_F_ERRED;
+                        return err;
+                    }
+
+                    // mark cache as dirty since we may have read data into it
+                    lfs2_cache_zero(lfs2, &file->cache);
+                }
+
+                // extend file with new blocks
+                lfs2_alloc_ack(lfs2);
+                int err = lfs2_ctz_extend(lfs2, &file->cache, &lfs2->rcache,
+                        file->block, file->pos,
+                        &file->block, &file->off);
+                if (err) {
+                    file->flags |= LFS2_F_ERRED;
+                    return err;
+                }
+            } else {
+                file->block = LFS2_BLOCK_INLINE;
+                file->off = file->pos;
+            }
+
+            file->flags |= LFS2_F_WRITING;
+        }
+
+        // program as much as we can in current block
+        lfs2_size_t diff = lfs2_min(nsize, lfs2->cfg->block_size - file->off);
+        while (true) {
+            int err = lfs2_bd_prog(lfs2, &file->cache, &lfs2->rcache, true,
+                    file->block, file->off, data, diff);
+            if (err) {
+                if (err == LFS2_ERR_CORRUPT) {
+                    goto relocate;
+                }
+                file->flags |= LFS2_F_ERRED;
+                return err;
+            }
+
+            break;
+relocate:
+            err = lfs2_file_relocate(lfs2, file);
+            if (err) {
+                file->flags |= LFS2_F_ERRED;
+                return err;
+            }
+        }
+
+        file->pos += diff;
+        file->off += diff;
+        data += diff;
+        nsize -= diff;
+
+        lfs2_alloc_ack(lfs2);
+    }
+
+    file->flags &= ~LFS2_F_ERRED;
+    return size;
+}
+#endif
+
+static lfs2_soff_t lfs2_file_rawseek(lfs2_t *lfs2, lfs2_file_t *file,
+        lfs2_soff_t off, int whence) {
+#ifndef LFS2_READONLY
+    // write out everything beforehand, may be noop if rdonly
+    int err = lfs2_file_flush(lfs2, file);
+    if (err) {
+        return err;
+    }
+#endif
+
+    // find new pos
+    lfs2_off_t npos = file->pos;
+    if (whence == LFS2_SEEK_SET) {
+        npos = off;
+    } else if (whence == LFS2_SEEK_CUR) {
+        npos = file->pos + off;
+    } else if (whence == LFS2_SEEK_END) {
+        npos = file->ctz.size + off;
+    }
+
+    if (npos > lfs2->file_max) {
+        // file position out of range
+        return LFS2_ERR_INVAL;
+    }
+
+    // update pos
+    file->pos = npos;
+    return npos;
+}
+
+#ifndef LFS2_READONLY
+static int lfs2_file_rawtruncate(lfs2_t *lfs2, lfs2_file_t *file, lfs2_off_t size) {
+    LFS2_ASSERT((file->flags & LFS2_O_WRONLY) == LFS2_O_WRONLY);
+
+    if (size > LFS2_FILE_MAX) {
+        return LFS2_ERR_INVAL;
+    }
+
+    lfs2_off_t pos = file->pos;
+    lfs2_off_t oldsize = lfs2_file_rawsize(lfs2, file);
+    if (size < oldsize) {
+        // need to flush since directly changing metadata
+        int err = lfs2_file_flush(lfs2, file);
+        if (err) {
+            return err;
+        }
+
+        // lookup new head in ctz skip list
+        err = lfs2_ctz_find(lfs2, NULL, &file->cache,
+                file->ctz.head, file->ctz.size,
+                size, &file->block, &file->off);
+        if (err) {
+            return err;
+        }
+
+        file->ctz.head = file->block;
+        file->ctz.size = size;
+        file->flags |= LFS2_F_DIRTY | LFS2_F_READING;
+    } else if (size > oldsize) {
+        // flush+seek if not already at end
+        if (file->pos != oldsize) {
+            lfs2_soff_t res = lfs2_file_rawseek(lfs2, file, 0, LFS2_SEEK_END);
+            if (res < 0) {
+                return (int)res;
+            }
+        }
+
+        // fill with zeros
+        while (file->pos < size) {
+            lfs2_ssize_t res = lfs2_file_rawwrite(lfs2, file, &(uint8_t){0}, 1);
+            if (res < 0) {
+                return (int)res;
+            }
+        }
+    }
+
+    // restore pos
+    lfs2_soff_t res = lfs2_file_rawseek(lfs2, file, pos, LFS2_SEEK_SET);
+    if (res < 0) {
+      return (int)res;
+    }
+
+    return 0;
+}
+#endif
+
+static lfs2_soff_t lfs2_file_rawtell(lfs2_t *lfs2, lfs2_file_t *file) {
+    (void)lfs2;
+    return file->pos;
+}
+
+static int lfs2_file_rawrewind(lfs2_t *lfs2, lfs2_file_t *file) {
+    lfs2_soff_t res = lfs2_file_rawseek(lfs2, file, 0, LFS2_SEEK_SET);
+    if (res < 0) {
+        return (int)res;
+    }
+
+    return 0;
+}
+
+static lfs2_soff_t lfs2_file_rawsize(lfs2_t *lfs2, lfs2_file_t *file) {
+    (void)lfs2;
+
+#ifndef LFS2_READONLY
+    if (file->flags & LFS2_F_WRITING) {
+        return lfs2_max(file->pos, file->ctz.size);
+    }
+#endif
+
+    return file->ctz.size;
+}
+
+
+/// General fs operations ///
+static int lfs2_rawstat(lfs2_t *lfs2, const char *path, struct lfs2_info *info) {
+    lfs2_mdir_t cwd;
+    lfs2_stag_t tag = lfs2_dir_find(lfs2, &cwd, &path, NULL);
+    if (tag < 0) {
+        return (int)tag;
+    }
+
+    return lfs2_dir_getinfo(lfs2, &cwd, lfs2_tag_id(tag), info);
+}
+
+#ifndef LFS2_READONLY
+static int lfs2_rawremove(lfs2_t *lfs2, const char *path) {
+    // deorphan if we haven't yet, needed at most once after poweron
+    int err = lfs2_fs_forceconsistency(lfs2);
+    if (err) {
+        return err;
+    }
+
+    lfs2_mdir_t cwd;
+    lfs2_stag_t tag = lfs2_dir_find(lfs2, &cwd, &path, NULL);
+    if (tag < 0 || lfs2_tag_id(tag) == 0x3ff) {
+        return (tag < 0) ? (int)tag : LFS2_ERR_INVAL;
+    }
+
+    struct lfs2_mlist dir;
+    dir.next = lfs2->mlist;
+    if (lfs2_tag_type3(tag) == LFS2_TYPE_DIR) {
+        // must be empty before removal
+        lfs2_block_t pair[2];
+        lfs2_stag_t res = lfs2_dir_get(lfs2, &cwd, LFS2_MKTAG(0x700, 0x3ff, 0),
+                LFS2_MKTAG(LFS2_TYPE_STRUCT, lfs2_tag_id(tag), 8), pair);
+        if (res < 0) {
+            return (int)res;
+        }
+        lfs2_pair_fromle32(pair);
+
+        err = lfs2_dir_fetch(lfs2, &dir.m, pair);
+        if (err) {
+            return err;
+        }
+
+        if (dir.m.count > 0 || dir.m.split) {
+            return LFS2_ERR_NOTEMPTY;
+        }
+
+        // mark fs as orphaned
+        lfs2_fs_preporphans(lfs2, +1);
+
+        // I know it's crazy but yes, dir can be changed by our parent's
+        // commit (if predecessor is child)
+        dir.type = 0;
+        dir.id = 0;
+        lfs2->mlist = &dir;
+    }
+
+    // delete the entry
+    err = lfs2_dir_commit(lfs2, &cwd, LFS2_MKATTRS(
+            {LFS2_MKTAG(LFS2_TYPE_DELETE, lfs2_tag_id(tag), 0), NULL}));
+    if (err) {
+        lfs2->mlist = dir.next;
+        return err;
+    }
+
+    lfs2->mlist = dir.next;
+    if (lfs2_tag_type3(tag) == LFS2_TYPE_DIR) {
+        // fix orphan
+        lfs2_fs_preporphans(lfs2, -1);
+
+        err = lfs2_fs_pred(lfs2, dir.m.pair, &cwd);
+        if (err) {
+            return err;
+        }
+
+        err = lfs2_dir_drop(lfs2, &cwd, &dir.m);
+        if (err) {
+            return err;
+        }
+    }
+
+    return 0;
+}
+#endif
+
+#ifndef LFS2_READONLY
+static int lfs2_rawrename(lfs2_t *lfs2, const char *oldpath, const char *newpath) {
+    // deorphan if we haven't yet, needed at most once after poweron
+    int err = lfs2_fs_forceconsistency(lfs2);
+    if (err) {
+        return err;
+    }
+
+    // find old entry
+    lfs2_mdir_t oldcwd;
+    lfs2_stag_t oldtag = lfs2_dir_find(lfs2, &oldcwd, &oldpath, NULL);
+    if (oldtag < 0 || lfs2_tag_id(oldtag) == 0x3ff) {
+        return (oldtag < 0) ? (int)oldtag : LFS2_ERR_INVAL;
+    }
+
+    // find new entry
+    lfs2_mdir_t newcwd;
+    uint16_t newid;
+    lfs2_stag_t prevtag = lfs2_dir_find(lfs2, &newcwd, &newpath, &newid);
+    if ((prevtag < 0 || lfs2_tag_id(prevtag) == 0x3ff) &&
+            !(prevtag == LFS2_ERR_NOENT && newid != 0x3ff)) {
+        return (prevtag < 0) ? (int)prevtag : LFS2_ERR_INVAL;
+    }
+
+    // if we're in the same pair there's a few special cases...
+    bool samepair = (lfs2_pair_cmp(oldcwd.pair, newcwd.pair) == 0);
+    uint16_t newoldid = lfs2_tag_id(oldtag);
+
+    struct lfs2_mlist prevdir;
+    prevdir.next = lfs2->mlist;
+    if (prevtag == LFS2_ERR_NOENT) {
+        // check that name fits
+        lfs2_size_t nlen = strlen(newpath);
+        if (nlen > lfs2->name_max) {
+            return LFS2_ERR_NAMETOOLONG;
+        }
+
+        // there is a small chance we are being renamed in the same
+        // directory/ to an id less than our old id, the global update
+        // to handle this is a bit messy
+        if (samepair && newid <= newoldid) {
+            newoldid += 1;
+        }
+    } else if (lfs2_tag_type3(prevtag) != lfs2_tag_type3(oldtag)) {
+        return LFS2_ERR_ISDIR;
+    } else if (samepair && newid == newoldid) {
+        // we're renaming to ourselves??
+        return 0;
+    } else if (lfs2_tag_type3(prevtag) == LFS2_TYPE_DIR) {
+        // must be empty before removal
+        lfs2_block_t prevpair[2];
+        lfs2_stag_t res = lfs2_dir_get(lfs2, &newcwd, LFS2_MKTAG(0x700, 0x3ff, 0),
+                LFS2_MKTAG(LFS2_TYPE_STRUCT, newid, 8), prevpair);
+        if (res < 0) {
+            return (int)res;
+        }
+        lfs2_pair_fromle32(prevpair);
+
+        // must be empty before removal
+        err = lfs2_dir_fetch(lfs2, &prevdir.m, prevpair);
+        if (err) {
+            return err;
+        }
+
+        if (prevdir.m.count > 0 || prevdir.m.split) {
+            return LFS2_ERR_NOTEMPTY;
+        }
+
+        // mark fs as orphaned
+        lfs2_fs_preporphans(lfs2, +1);
+
+        // I know it's crazy but yes, dir can be changed by our parent's
+        // commit (if predecessor is child)
+        prevdir.type = 0;
+        prevdir.id = 0;
+        lfs2->mlist = &prevdir;
+    }
+
+    if (!samepair) {
+        lfs2_fs_prepmove(lfs2, newoldid, oldcwd.pair);
+    }
+
+    // move over all attributes
+    err = lfs2_dir_commit(lfs2, &newcwd, LFS2_MKATTRS(
+            {LFS2_MKTAG_IF(prevtag != LFS2_ERR_NOENT,
+                LFS2_TYPE_DELETE, newid, 0), NULL},
+            {LFS2_MKTAG(LFS2_TYPE_CREATE, newid, 0), NULL},
+            {LFS2_MKTAG(lfs2_tag_type3(oldtag), newid, strlen(newpath)), newpath},
+            {LFS2_MKTAG(LFS2_FROM_MOVE, newid, lfs2_tag_id(oldtag)), &oldcwd},
+            {LFS2_MKTAG_IF(samepair,
+                LFS2_TYPE_DELETE, newoldid, 0), NULL}));
+    if (err) {
+        lfs2->mlist = prevdir.next;
+        return err;
+    }
+
+    // let commit clean up after move (if we're different! otherwise move
+    // logic already fixed it for us)
+    if (!samepair && lfs2_gstate_hasmove(&lfs2->gstate)) {
+        // prep gstate and delete move id
+        lfs2_fs_prepmove(lfs2, 0x3ff, NULL);
+        err = lfs2_dir_commit(lfs2, &oldcwd, LFS2_MKATTRS(
+                {LFS2_MKTAG(LFS2_TYPE_DELETE, lfs2_tag_id(oldtag), 0), NULL}));
+        if (err) {
+            lfs2->mlist = prevdir.next;
+            return err;
+        }
+    }
+
+    lfs2->mlist = prevdir.next;
+    if (prevtag != LFS2_ERR_NOENT && lfs2_tag_type3(prevtag) == LFS2_TYPE_DIR) {
+        // fix orphan
+        lfs2_fs_preporphans(lfs2, -1);
+
+        err = lfs2_fs_pred(lfs2, prevdir.m.pair, &newcwd);
+        if (err) {
+            return err;
+        }
+
+        err = lfs2_dir_drop(lfs2, &newcwd, &prevdir.m);
+        if (err) {
+            return err;
+        }
+    }
+
+    return 0;
+}
+#endif
+
+static lfs2_ssize_t lfs2_rawgetattr(lfs2_t *lfs2, const char *path,
+        uint8_t type, void *buffer, lfs2_size_t size) {
+    lfs2_mdir_t cwd;
+    lfs2_stag_t tag = lfs2_dir_find(lfs2, &cwd, &path, NULL);
+    if (tag < 0) {
+        return tag;
+    }
+
+    uint16_t id = lfs2_tag_id(tag);
+    if (id == 0x3ff) {
+        // special case for root
+        id = 0;
+        int err = lfs2_dir_fetch(lfs2, &cwd, lfs2->root);
+        if (err) {
+            return err;
+        }
+    }
+
+    tag = lfs2_dir_get(lfs2, &cwd, LFS2_MKTAG(0x7ff, 0x3ff, 0),
+            LFS2_MKTAG(LFS2_TYPE_USERATTR + type,
+                id, lfs2_min(size, lfs2->attr_max)),
+            buffer);
+    if (tag < 0) {
+        if (tag == LFS2_ERR_NOENT) {
+            return LFS2_ERR_NOATTR;
+        }
+
+        return tag;
+    }
+
+    return lfs2_tag_size(tag);
+}
+
+#ifndef LFS2_READONLY
+static int lfs2_commitattr(lfs2_t *lfs2, const char *path,
+        uint8_t type, const void *buffer, lfs2_size_t size) {
+    lfs2_mdir_t cwd;
+    lfs2_stag_t tag = lfs2_dir_find(lfs2, &cwd, &path, NULL);
+    if (tag < 0) {
+        return tag;
+    }
+
+    uint16_t id = lfs2_tag_id(tag);
+    if (id == 0x3ff) {
+        // special case for root
+        id = 0;
+        int err = lfs2_dir_fetch(lfs2, &cwd, lfs2->root);
+        if (err) {
+            return err;
+        }
+    }
+
+    return lfs2_dir_commit(lfs2, &cwd, LFS2_MKATTRS(
+            {LFS2_MKTAG(LFS2_TYPE_USERATTR + type, id, size), buffer}));
+}
+#endif
+
+#ifndef LFS2_READONLY
+static int lfs2_rawsetattr(lfs2_t *lfs2, const char *path,
+        uint8_t type, const void *buffer, lfs2_size_t size) {
+    if (size > lfs2->attr_max) {
+        return LFS2_ERR_NOSPC;
+    }
+
+    return lfs2_commitattr(lfs2, path, type, buffer, size);
+}
+#endif
+
+#ifndef LFS2_READONLY
+static int lfs2_rawremoveattr(lfs2_t *lfs2, const char *path, uint8_t type) {
+    return lfs2_commitattr(lfs2, path, type, NULL, 0x3ff);
+}
+#endif
+
+
+/// Filesystem operations ///
+static int lfs2_init(lfs2_t *lfs2, const struct lfs2_config *cfg) {
+    lfs2->cfg = cfg;
+    int err = 0;
+
+    // validate that the lfs2-cfg sizes were initiated properly before
+    // performing any arithmetic logics with them
+    LFS2_ASSERT(lfs2->cfg->read_size != 0);
+    LFS2_ASSERT(lfs2->cfg->prog_size != 0);
+    LFS2_ASSERT(lfs2->cfg->cache_size != 0);
+
+    // check that block size is a multiple of cache size is a multiple
+    // of prog and read sizes
+    LFS2_ASSERT(lfs2->cfg->cache_size % lfs2->cfg->read_size == 0);
+    LFS2_ASSERT(lfs2->cfg->cache_size % lfs2->cfg->prog_size == 0);
+    LFS2_ASSERT(lfs2->cfg->block_size % lfs2->cfg->cache_size == 0);
+
+    // check that the block size is large enough to fit ctz pointers
+    LFS2_ASSERT(4*lfs2_npw2(0xffffffff / (lfs2->cfg->block_size-2*4))
+            <= lfs2->cfg->block_size);
+
+    // block_cycles = 0 is no longer supported.
+    //
+    // block_cycles is the number of erase cycles before littlefs evicts
+    // metadata logs as a part of wear leveling. Suggested values are in the
+    // range of 100-1000, or set block_cycles to -1 to disable block-level
+    // wear-leveling.
+    LFS2_ASSERT(lfs2->cfg->block_cycles != 0);
+
+
+    // setup read cache
+    if (lfs2->cfg->read_buffer) {
+        lfs2->rcache.buffer = lfs2->cfg->read_buffer;
+    } else {
+        lfs2->rcache.buffer = lfs2_malloc(lfs2->cfg->cache_size);
+        if (!lfs2->rcache.buffer) {
+            err = LFS2_ERR_NOMEM;
+            goto cleanup;
+        }
+    }
+
+    // setup program cache
+    if (lfs2->cfg->prog_buffer) {
+        lfs2->pcache.buffer = lfs2->cfg->prog_buffer;
+    } else {
+        lfs2->pcache.buffer = lfs2_malloc(lfs2->cfg->cache_size);
+        if (!lfs2->pcache.buffer) {
+            err = LFS2_ERR_NOMEM;
+            goto cleanup;
+        }
+    }
+
+    // zero to avoid information leaks
+    lfs2_cache_zero(lfs2, &lfs2->rcache);
+    lfs2_cache_zero(lfs2, &lfs2->pcache);
+
+    // setup lookahead, must be multiple of 64-bits, 32-bit aligned
+    LFS2_ASSERT(lfs2->cfg->lookahead_size > 0);
+    LFS2_ASSERT(lfs2->cfg->lookahead_size % 8 == 0 &&
+            (uintptr_t)lfs2->cfg->lookahead_buffer % 4 == 0);
+    if (lfs2->cfg->lookahead_buffer) {
+        lfs2->free.buffer = lfs2->cfg->lookahead_buffer;
+    } else {
+        lfs2->free.buffer = lfs2_malloc(lfs2->cfg->lookahead_size);
+        if (!lfs2->free.buffer) {
+            err = LFS2_ERR_NOMEM;
+            goto cleanup;
+        }
+    }
+
+    // check that the size limits are sane
+    LFS2_ASSERT(lfs2->cfg->name_max <= LFS2_NAME_MAX);
+    lfs2->name_max = lfs2->cfg->name_max;
+    if (!lfs2->name_max) {
+        lfs2->name_max = LFS2_NAME_MAX;
+    }
+
+    LFS2_ASSERT(lfs2->cfg->file_max <= LFS2_FILE_MAX);
+    lfs2->file_max = lfs2->cfg->file_max;
+    if (!lfs2->file_max) {
+        lfs2->file_max = LFS2_FILE_MAX;
+    }
+
+    LFS2_ASSERT(lfs2->cfg->attr_max <= LFS2_ATTR_MAX);
+    lfs2->attr_max = lfs2->cfg->attr_max;
+    if (!lfs2->attr_max) {
+        lfs2->attr_max = LFS2_ATTR_MAX;
+    }
+
+    // setup default state
+    lfs2->root[0] = LFS2_BLOCK_NULL;
+    lfs2->root[1] = LFS2_BLOCK_NULL;
+    lfs2->mlist = NULL;
+    lfs2->seed = 0;
+    lfs2->gdisk = (lfs2_gstate_t){0};
+    lfs2->gstate = (lfs2_gstate_t){0};
+    lfs2->gdelta = (lfs2_gstate_t){0};
+#ifdef LFS2_MIGRATE
+    lfs2->lfs21 = NULL;
+#endif
+
+    return 0;
+
+cleanup:
+    lfs2_deinit(lfs2);
+    return err;
+}
+
+static int lfs2_deinit(lfs2_t *lfs2) {
+    // free allocated memory
+    if (!lfs2->cfg->read_buffer) {
+        lfs2_free(lfs2->rcache.buffer);
+    }
+
+    if (!lfs2->cfg->prog_buffer) {
+        lfs2_free(lfs2->pcache.buffer);
+    }
+
+    if (!lfs2->cfg->lookahead_buffer) {
+        lfs2_free(lfs2->free.buffer);
+    }
+
+    return 0;
+}
+
+#ifndef LFS2_READONLY
+static int lfs2_rawformat(lfs2_t *lfs2, const struct lfs2_config *cfg) {
+    int err = 0;
+    {
+        err = lfs2_init(lfs2, cfg);
+        if (err) {
+            return err;
+        }
+
+        // create free lookahead
+        memset(lfs2->free.buffer, 0, lfs2->cfg->lookahead_size);
+        lfs2->free.off = 0;
+        lfs2->free.size = lfs2_min(8*lfs2->cfg->lookahead_size,
+                lfs2->cfg->block_count);
+        lfs2->free.i = 0;
+        lfs2_alloc_ack(lfs2);
+
+        // create root dir
+        lfs2_mdir_t root;
+        err = lfs2_dir_alloc(lfs2, &root);
+        if (err) {
+            goto cleanup;
+        }
+
+        // write one superblock
+        lfs2_superblock_t superblock = {
+            .version     = LFS2_DISK_VERSION,
+            .block_size  = lfs2->cfg->block_size,
+            .block_count = lfs2->cfg->block_count,
+            .name_max    = lfs2->name_max,
+            .file_max    = lfs2->file_max,
+            .attr_max    = lfs2->attr_max,
+        };
+
+        lfs2_superblock_tole32(&superblock);
+        err = lfs2_dir_commit(lfs2, &root, LFS2_MKATTRS(
+                {LFS2_MKTAG(LFS2_TYPE_CREATE, 0, 0), NULL},
+                {LFS2_MKTAG(LFS2_TYPE_SUPERBLOCK, 0, 8), "littlefs"},
+                {LFS2_MKTAG(LFS2_TYPE_INLINESTRUCT, 0, sizeof(superblock)),
+                    &superblock}));
+        if (err) {
+            goto cleanup;
+        }
+
+        // sanity check that fetch works
+        err = lfs2_dir_fetch(lfs2, &root, (const lfs2_block_t[2]){0, 1});
+        if (err) {
+            goto cleanup;
+        }
+
+        // force compaction to prevent accidentally mounting any
+        // older version of littlefs that may live on disk
+        root.erased = false;
+        err = lfs2_dir_commit(lfs2, &root, NULL, 0);
+        if (err) {
+            goto cleanup;
+        }
+    }
+
+cleanup:
+    lfs2_deinit(lfs2);
+    return err;
+
+}
+#endif
+
+static int lfs2_rawmount(lfs2_t *lfs2, const struct lfs2_config *cfg) {
+    int err = lfs2_init(lfs2, cfg);
+    if (err) {
+        return err;
+    }
+
+    // scan directory blocks for superblock and any global updates
+    lfs2_mdir_t dir = {.tail = {0, 1}};
+    lfs2_block_t cycle = 0;
+    while (!lfs2_pair_isnull(dir.tail)) {
+        if (cycle >= lfs2->cfg->block_count/2) {
+            // loop detected
+            err = LFS2_ERR_CORRUPT;
+            goto cleanup;
+        }
+        cycle += 1;
+
+        // fetch next block in tail list
+        lfs2_stag_t tag = lfs2_dir_fetchmatch(lfs2, &dir, dir.tail,
+                LFS2_MKTAG(0x7ff, 0x3ff, 0),
+                LFS2_MKTAG(LFS2_TYPE_SUPERBLOCK, 0, 8),
+                NULL,
+                lfs2_dir_find_match, &(struct lfs2_dir_find_match){
+                    lfs2, "littlefs", 8});
+        if (tag < 0) {
+            err = tag;
+            goto cleanup;
+        }
+
+        // has superblock?
+        if (tag && !lfs2_tag_isdelete(tag)) {
+            // update root
+            lfs2->root[0] = dir.pair[0];
+            lfs2->root[1] = dir.pair[1];
+
+            // grab superblock
+            lfs2_superblock_t superblock;
+            tag = lfs2_dir_get(lfs2, &dir, LFS2_MKTAG(0x7ff, 0x3ff, 0),
+                    LFS2_MKTAG(LFS2_TYPE_INLINESTRUCT, 0, sizeof(superblock)),
+                    &superblock);
+            if (tag < 0) {
+                err = tag;
+                goto cleanup;
+            }
+            lfs2_superblock_fromle32(&superblock);
+
+            // check version
+            uint16_t major_version = (0xffff & (superblock.version >> 16));
+            uint16_t minor_version = (0xffff & (superblock.version >>  0));
+            if ((major_version != LFS2_DISK_VERSION_MAJOR ||
+                 minor_version > LFS2_DISK_VERSION_MINOR)) {
+                LFS2_ERROR("Invalid version v%"PRIu16".%"PRIu16,
+                        major_version, minor_version);
+                err = LFS2_ERR_INVAL;
+                goto cleanup;
+            }
+
+            // check superblock configuration
+            if (superblock.name_max) {
+                if (superblock.name_max > lfs2->name_max) {
+                    LFS2_ERROR("Unsupported name_max (%"PRIu32" > %"PRIu32")",
+                            superblock.name_max, lfs2->name_max);
+                    err = LFS2_ERR_INVAL;
+                    goto cleanup;
+                }
+
+                lfs2->name_max = superblock.name_max;
+            }
+
+            if (superblock.file_max) {
+                if (superblock.file_max > lfs2->file_max) {
+                    LFS2_ERROR("Unsupported file_max (%"PRIu32" > %"PRIu32")",
+                            superblock.file_max, lfs2->file_max);
+                    err = LFS2_ERR_INVAL;
+                    goto cleanup;
+                }
+
+                lfs2->file_max = superblock.file_max;
+            }
+
+            if (superblock.attr_max) {
+                if (superblock.attr_max > lfs2->attr_max) {
+                    LFS2_ERROR("Unsupported attr_max (%"PRIu32" > %"PRIu32")",
+                            superblock.attr_max, lfs2->attr_max);
+                    err = LFS2_ERR_INVAL;
+                    goto cleanup;
+                }
+
+                lfs2->attr_max = superblock.attr_max;
+            }
+        }
+
+        // has gstate?
+        err = lfs2_dir_getgstate(lfs2, &dir, &lfs2->gstate);
+        if (err) {
+            goto cleanup;
+        }
+    }
+
+    // found superblock?
+    if (lfs2_pair_isnull(lfs2->root)) {
+        err = LFS2_ERR_INVAL;
+        goto cleanup;
+    }
+
+    // update littlefs with gstate
+    if (!lfs2_gstate_iszero(&lfs2->gstate)) {
+        LFS2_DEBUG("Found pending gstate 0x%08"PRIx32"%08"PRIx32"%08"PRIx32,
+                lfs2->gstate.tag,
+                lfs2->gstate.pair[0],
+                lfs2->gstate.pair[1]);
+    }
+    lfs2->gstate.tag += !lfs2_tag_isvalid(lfs2->gstate.tag);
+    lfs2->gdisk = lfs2->gstate;
+
+    // setup free lookahead, to distribute allocations uniformly across
+    // boots, we start the allocator at a random location
+    lfs2->free.off = lfs2->seed % lfs2->cfg->block_count;
+    lfs2_alloc_drop(lfs2);
+
+    return 0;
+
+cleanup:
+    lfs2_rawunmount(lfs2);
+    return err;
+}
+
+static int lfs2_rawunmount(lfs2_t *lfs2) {
+    return lfs2_deinit(lfs2);
+}
+
+
+/// Filesystem filesystem operations ///
+int lfs2_fs_rawtraverse(lfs2_t *lfs2,
+        int (*cb)(void *data, lfs2_block_t block), void *data,
+        bool includeorphans) {
+    // iterate over metadata pairs
+    lfs2_mdir_t dir = {.tail = {0, 1}};
+
+#ifdef LFS2_MIGRATE
+    // also consider v1 blocks during migration
+    if (lfs2->lfs21) {
+        int err = lfs21_traverse(lfs2, cb, data);
+        if (err) {
+            return err;
+        }
+
+        dir.tail[0] = lfs2->root[0];
+        dir.tail[1] = lfs2->root[1];
+    }
+#endif
+
+    lfs2_block_t cycle = 0;
+    while (!lfs2_pair_isnull(dir.tail)) {
+        if (cycle >= lfs2->cfg->block_count/2) {
+            // loop detected
+            return LFS2_ERR_CORRUPT;
+        }
+        cycle += 1;
+
+        for (int i = 0; i < 2; i++) {
+            int err = cb(data, dir.tail[i]);
+            if (err) {
+                return err;
+            }
+        }
+
+        // iterate through ids in directory
+        int err = lfs2_dir_fetch(lfs2, &dir, dir.tail);
+        if (err) {
+            return err;
+        }
+
+        for (uint16_t id = 0; id < dir.count; id++) {
+            struct lfs2_ctz ctz;
+            lfs2_stag_t tag = lfs2_dir_get(lfs2, &dir, LFS2_MKTAG(0x700, 0x3ff, 0),
+                    LFS2_MKTAG(LFS2_TYPE_STRUCT, id, sizeof(ctz)), &ctz);
+            if (tag < 0) {
+                if (tag == LFS2_ERR_NOENT) {
+                    continue;
+                }
+                return tag;
+            }
+            lfs2_ctz_fromle32(&ctz);
+
+            if (lfs2_tag_type3(tag) == LFS2_TYPE_CTZSTRUCT) {
+                err = lfs2_ctz_traverse(lfs2, NULL, &lfs2->rcache,
+                        ctz.head, ctz.size, cb, data);
+                if (err) {
+                    return err;
+                }
+            } else if (includeorphans && 
+                    lfs2_tag_type3(tag) == LFS2_TYPE_DIRSTRUCT) {
+                for (int i = 0; i < 2; i++) {
+                    err = cb(data, (&ctz.head)[i]);
+                    if (err) {
+                        return err;
+                    }
+                }
+            }
+        }
+    }
+
+#ifndef LFS2_READONLY
+    // iterate over any open files
+    for (lfs2_file_t *f = (lfs2_file_t*)lfs2->mlist; f; f = f->next) {
+        if (f->type != LFS2_TYPE_REG) {
+            continue;
+        }
+
+        if ((f->flags & LFS2_F_DIRTY) && !(f->flags & LFS2_F_INLINE)) {
+            int err = lfs2_ctz_traverse(lfs2, &f->cache, &lfs2->rcache,
+                    f->ctz.head, f->ctz.size, cb, data);
+            if (err) {
+                return err;
+            }
+        }
+
+        if ((f->flags & LFS2_F_WRITING) && !(f->flags & LFS2_F_INLINE)) {
+            int err = lfs2_ctz_traverse(lfs2, &f->cache, &lfs2->rcache,
+                    f->block, f->pos, cb, data);
+            if (err) {
+                return err;
+            }
+        }
+    }
+#endif
+
+    return 0;
+}
+
+#ifndef LFS2_READONLY
+static int lfs2_fs_pred(lfs2_t *lfs2,
+        const lfs2_block_t pair[2], lfs2_mdir_t *pdir) {
+    // iterate over all directory directory entries
+    pdir->tail[0] = 0;
+    pdir->tail[1] = 1;
+    lfs2_block_t cycle = 0;
+    while (!lfs2_pair_isnull(pdir->tail)) {
+        if (cycle >= lfs2->cfg->block_count/2) {
+            // loop detected
+            return LFS2_ERR_CORRUPT;
+        }
+        cycle += 1;
+
+        if (lfs2_pair_cmp(pdir->tail, pair) == 0) {
+            return 0;
+        }
+
+        int err = lfs2_dir_fetch(lfs2, pdir, pdir->tail);
+        if (err) {
+            return err;
+        }
+    }
+
+    return LFS2_ERR_NOENT;
+}
+#endif
+
+#ifndef LFS2_READONLY
+struct lfs2_fs_parent_match {
+    lfs2_t *lfs2;
+    const lfs2_block_t pair[2];
+};
+#endif
+
+#ifndef LFS2_READONLY
+static int lfs2_fs_parent_match(void *data,
+        lfs2_tag_t tag, const void *buffer) {
+    struct lfs2_fs_parent_match *find = data;
+    lfs2_t *lfs2 = find->lfs2;
+    const struct lfs2_diskoff *disk = buffer;
+    (void)tag;
+
+    lfs2_block_t child[2];
+    int err = lfs2_bd_read(lfs2,
+            &lfs2->pcache, &lfs2->rcache, lfs2->cfg->block_size,
+            disk->block, disk->off, &child, sizeof(child));
+    if (err) {
+        return err;
+    }
+
+    lfs2_pair_fromle32(child);
+    return (lfs2_pair_cmp(child, find->pair) == 0) ? LFS2_CMP_EQ : LFS2_CMP_LT;
+}
+#endif
+
+#ifndef LFS2_READONLY
+static lfs2_stag_t lfs2_fs_parent(lfs2_t *lfs2, const lfs2_block_t pair[2],
+        lfs2_mdir_t *parent) {
+    // use fetchmatch with callback to find pairs
+    parent->tail[0] = 0;
+    parent->tail[1] = 1;
+    lfs2_block_t cycle = 0;
+    while (!lfs2_pair_isnull(parent->tail)) {
+        if (cycle >= lfs2->cfg->block_count/2) {
+            // loop detected
+            return LFS2_ERR_CORRUPT;
+        }
+        cycle += 1;
+
+        lfs2_stag_t tag = lfs2_dir_fetchmatch(lfs2, parent, parent->tail,
+                LFS2_MKTAG(0x7ff, 0, 0x3ff),
+                LFS2_MKTAG(LFS2_TYPE_DIRSTRUCT, 0, 8),
+                NULL,
+                lfs2_fs_parent_match, &(struct lfs2_fs_parent_match){
+                    lfs2, {pair[0], pair[1]}});
+        if (tag && tag != LFS2_ERR_NOENT) {
+            return tag;
+        }
+    }
+
+    return LFS2_ERR_NOENT;
+}
+#endif
+
+#ifndef LFS2_READONLY
+static int lfs2_fs_relocate(lfs2_t *lfs2,
+        const lfs2_block_t oldpair[2], lfs2_block_t newpair[2]) {
+    // update internal root
+    if (lfs2_pair_cmp(oldpair, lfs2->root) == 0) {
+        lfs2->root[0] = newpair[0];
+        lfs2->root[1] = newpair[1];
+    }
+
+    // update internally tracked dirs
+    for (struct lfs2_mlist *d = lfs2->mlist; d; d = d->next) {
+        if (lfs2_pair_cmp(oldpair, d->m.pair) == 0) {
+            d->m.pair[0] = newpair[0];
+            d->m.pair[1] = newpair[1];
+        }
+
+        if (d->type == LFS2_TYPE_DIR &&
+                lfs2_pair_cmp(oldpair, ((lfs2_dir_t*)d)->head) == 0) {
+            ((lfs2_dir_t*)d)->head[0] = newpair[0];
+            ((lfs2_dir_t*)d)->head[1] = newpair[1];
+        }
+    }
+
+    // find parent
+    lfs2_mdir_t parent;
+    lfs2_stag_t tag = lfs2_fs_parent(lfs2, oldpair, &parent);
+    if (tag < 0 && tag != LFS2_ERR_NOENT) {
+        return tag;
+    }
+
+    if (tag != LFS2_ERR_NOENT) {
+        // update disk, this creates a desync
+        lfs2_fs_preporphans(lfs2, +1);
+
+        // fix pending move in this pair? this looks like an optimization but
+        // is in fact _required_ since relocating may outdate the move.
+        uint16_t moveid = 0x3ff;
+        if (lfs2_gstate_hasmovehere(&lfs2->gstate, parent.pair)) {
+            moveid = lfs2_tag_id(lfs2->gstate.tag);
+            LFS2_DEBUG("Fixing move while relocating "
+                    "{0x%"PRIx32", 0x%"PRIx32"} 0x%"PRIx16"\n",
+                    parent.pair[0], parent.pair[1], moveid);
+            lfs2_fs_prepmove(lfs2, 0x3ff, NULL);
+            if (moveid < lfs2_tag_id(tag)) {
+                tag -= LFS2_MKTAG(0, 1, 0);
+            }
+        }
+
+        lfs2_pair_tole32(newpair);
+        int err = lfs2_dir_commit(lfs2, &parent, LFS2_MKATTRS(
+                {LFS2_MKTAG_IF(moveid != 0x3ff,
+                    LFS2_TYPE_DELETE, moveid, 0), NULL},
+                {tag, newpair}));
+        lfs2_pair_fromle32(newpair);
+        if (err) {
+            return err;
+        }
+
+        // next step, clean up orphans
+        lfs2_fs_preporphans(lfs2, -1);
+    }
+
+    // find pred
+    int err = lfs2_fs_pred(lfs2, oldpair, &parent);
+    if (err && err != LFS2_ERR_NOENT) {
+        return err;
+    }
+
+    // if we can't find dir, it must be new
+    if (err != LFS2_ERR_NOENT) {
+        // fix pending move in this pair? this looks like an optimization but
+        // is in fact _required_ since relocating may outdate the move.
+        uint16_t moveid = 0x3ff;
+        if (lfs2_gstate_hasmovehere(&lfs2->gstate, parent.pair)) {
+            moveid = lfs2_tag_id(lfs2->gstate.tag);
+            LFS2_DEBUG("Fixing move while relocating "
+                    "{0x%"PRIx32", 0x%"PRIx32"} 0x%"PRIx16"\n",
+                    parent.pair[0], parent.pair[1], moveid);
+            lfs2_fs_prepmove(lfs2, 0x3ff, NULL);
+        }
+
+        // replace bad pair, either we clean up desync, or no desync occured
+        lfs2_pair_tole32(newpair);
+        err = lfs2_dir_commit(lfs2, &parent, LFS2_MKATTRS(
+                {LFS2_MKTAG_IF(moveid != 0x3ff,
+                    LFS2_TYPE_DELETE, moveid, 0), NULL},
+                {LFS2_MKTAG(LFS2_TYPE_TAIL + parent.split, 0x3ff, 8), newpair}));
+        lfs2_pair_fromle32(newpair);
+        if (err) {
+            return err;
+        }
+    }
+
+    return 0;
+}
+#endif
+
+#ifndef LFS2_READONLY
+static void lfs2_fs_preporphans(lfs2_t *lfs2, int8_t orphans) {
+    LFS2_ASSERT(lfs2_tag_size(lfs2->gstate.tag) > 0 || orphans >= 0);
+    lfs2->gstate.tag += orphans;
+    lfs2->gstate.tag = ((lfs2->gstate.tag & ~LFS2_MKTAG(0x800, 0, 0)) |
+            ((uint32_t)lfs2_gstate_hasorphans(&lfs2->gstate) << 31));
+}
+#endif
+
+#ifndef LFS2_READONLY
+static void lfs2_fs_prepmove(lfs2_t *lfs2,
+        uint16_t id, const lfs2_block_t pair[2]) {
+    lfs2->gstate.tag = ((lfs2->gstate.tag & ~LFS2_MKTAG(0x7ff, 0x3ff, 0)) |
+            ((id != 0x3ff) ? LFS2_MKTAG(LFS2_TYPE_DELETE, id, 0) : 0));
+    lfs2->gstate.pair[0] = (id != 0x3ff) ? pair[0] : 0;
+    lfs2->gstate.pair[1] = (id != 0x3ff) ? pair[1] : 0;
+}
+#endif
+
+#ifndef LFS2_READONLY
+static int lfs2_fs_demove(lfs2_t *lfs2) {
+    if (!lfs2_gstate_hasmove(&lfs2->gdisk)) {
+        return 0;
+    }
+
+    // Fix bad moves
+    LFS2_DEBUG("Fixing move {0x%"PRIx32", 0x%"PRIx32"} 0x%"PRIx16,
+            lfs2->gdisk.pair[0],
+            lfs2->gdisk.pair[1],
+            lfs2_tag_id(lfs2->gdisk.tag));
+
+    // fetch and delete the moved entry
+    lfs2_mdir_t movedir;
+    int err = lfs2_dir_fetch(lfs2, &movedir, lfs2->gdisk.pair);
+    if (err) {
+        return err;
+    }
+
+    // prep gstate and delete move id
+    uint16_t moveid = lfs2_tag_id(lfs2->gdisk.tag);
+    lfs2_fs_prepmove(lfs2, 0x3ff, NULL);
+    err = lfs2_dir_commit(lfs2, &movedir, LFS2_MKATTRS(
+            {LFS2_MKTAG(LFS2_TYPE_DELETE, moveid, 0), NULL}));
+    if (err) {
+        return err;
+    }
+
+    return 0;
+}
+#endif
+
+#ifndef LFS2_READONLY
+static int lfs2_fs_deorphan(lfs2_t *lfs2) {
+    if (!lfs2_gstate_hasorphans(&lfs2->gstate)) {
+        return 0;
+    }
+
+    // Fix any orphans
+    lfs2_mdir_t pdir = {.split = true, .tail = {0, 1}};
+    lfs2_mdir_t dir;
+
+    // iterate over all directory directory entries
+    while (!lfs2_pair_isnull(pdir.tail)) {
+        int err = lfs2_dir_fetch(lfs2, &dir, pdir.tail);
+        if (err) {
+            return err;
+        }
+
+        // check head blocks for orphans
+        if (!pdir.split) {
+            // check if we have a parent
+            lfs2_mdir_t parent;
+            lfs2_stag_t tag = lfs2_fs_parent(lfs2, pdir.tail, &parent);
+            if (tag < 0 && tag != LFS2_ERR_NOENT) {
+                return tag;
+            }
+
+            if (tag == LFS2_ERR_NOENT) {
+                // we are an orphan
+                LFS2_DEBUG("Fixing orphan {0x%"PRIx32", 0x%"PRIx32"}",
+                        pdir.tail[0], pdir.tail[1]);
+
+                err = lfs2_dir_drop(lfs2, &pdir, &dir);
+                if (err) {
+                    return err;
+                }
+
+                // refetch tail
+                continue;
+            }
+
+            lfs2_block_t pair[2];
+            lfs2_stag_t res = lfs2_dir_get(lfs2, &parent,
+                    LFS2_MKTAG(0x7ff, 0x3ff, 0), tag, pair);
+            if (res < 0) {
+                return res;
+            }
+            lfs2_pair_fromle32(pair);
+
+            if (!lfs2_pair_sync(pair, pdir.tail)) {
+                // we have desynced
+                LFS2_DEBUG("Fixing half-orphan {0x%"PRIx32", 0x%"PRIx32"} "
+                            "-> {0x%"PRIx32", 0x%"PRIx32"}",
+                        pdir.tail[0], pdir.tail[1], pair[0], pair[1]);
+
+                lfs2_pair_tole32(pair);
+                err = lfs2_dir_commit(lfs2, &pdir, LFS2_MKATTRS(
+                        {LFS2_MKTAG(LFS2_TYPE_SOFTTAIL, 0x3ff, 8), pair}));
+                lfs2_pair_fromle32(pair);
+                if (err) {
+                    return err;
+                }
+
+                // refetch tail
+                continue;
+            }
+        }
+
+        pdir = dir;
+    }
+
+    // mark orphans as fixed
+    lfs2_fs_preporphans(lfs2, -lfs2_gstate_getorphans(&lfs2->gstate));
+    return 0;
+}
+#endif
+
+#ifndef LFS2_READONLY
+static int lfs2_fs_forceconsistency(lfs2_t *lfs2) {
+    int err = lfs2_fs_demove(lfs2);
+    if (err) {
+        return err;
+    }
+
+    err = lfs2_fs_deorphan(lfs2);
+    if (err) {
+        return err;
+    }
+
+    return 0;
+}
+#endif
+
+static int lfs2_fs_size_count(void *p, lfs2_block_t block) {
+    (void)block;
+    lfs2_size_t *size = p;
+    *size += 1;
+    return 0;
+}
+
+static lfs2_ssize_t lfs2_fs_rawsize(lfs2_t *lfs2) {
+    lfs2_size_t size = 0;
+    int err = lfs2_fs_rawtraverse(lfs2, lfs2_fs_size_count, &size, false);
+    if (err) {
+        return err;
+    }
+
+    return size;
+}
+
+#ifdef LFS2_MIGRATE
+////// Migration from littelfs v1 below this //////
+
+/// Version info ///
+
+// Software library version
+// Major (top-nibble), incremented on backwards incompatible changes
+// Minor (bottom-nibble), incremented on feature additions
+#define LFS21_VERSION 0x00010007
+#define LFS21_VERSION_MAJOR (0xffff & (LFS21_VERSION >> 16))
+#define LFS21_VERSION_MINOR (0xffff & (LFS21_VERSION >>  0))
+
+// Version of On-disk data structures
+// Major (top-nibble), incremented on backwards incompatible changes
+// Minor (bottom-nibble), incremented on feature additions
+#define LFS21_DISK_VERSION 0x00010001
+#define LFS21_DISK_VERSION_MAJOR (0xffff & (LFS21_DISK_VERSION >> 16))
+#define LFS21_DISK_VERSION_MINOR (0xffff & (LFS21_DISK_VERSION >>  0))
+
+
+/// v1 Definitions ///
+
+// File types
+enum lfs21_type {
+    LFS21_TYPE_REG        = 0x11,
+    LFS21_TYPE_DIR        = 0x22,
+    LFS21_TYPE_SUPERBLOCK = 0x2e,
+};
+
+typedef struct lfs21 {
+    lfs2_block_t root[2];
+} lfs21_t;
+
+typedef struct lfs21_entry {
+    lfs2_off_t off;
+
+    struct lfs21_disk_entry {
+        uint8_t type;
+        uint8_t elen;
+        uint8_t alen;
+        uint8_t nlen;
+        union {
+            struct {
+                lfs2_block_t head;
+                lfs2_size_t size;
+            } file;
+            lfs2_block_t dir[2];
+        } u;
+    } d;
+} lfs21_entry_t;
+
+typedef struct lfs21_dir {
+    struct lfs21_dir *next;
+    lfs2_block_t pair[2];
+    lfs2_off_t off;
+
+    lfs2_block_t head[2];
+    lfs2_off_t pos;
+
+    struct lfs21_disk_dir {
+        uint32_t rev;
+        lfs2_size_t size;
+        lfs2_block_t tail[2];
+    } d;
+} lfs21_dir_t;
+
+typedef struct lfs21_superblock {
+    lfs2_off_t off;
+
+    struct lfs21_disk_superblock {
+        uint8_t type;
+        uint8_t elen;
+        uint8_t alen;
+        uint8_t nlen;
+        lfs2_block_t root[2];
+        uint32_t block_size;
+        uint32_t block_count;
+        uint32_t version;
+        char magic[8];
+    } d;
+} lfs21_superblock_t;
+
+
+/// Low-level wrappers v1->v2 ///
+static void lfs21_crc(uint32_t *crc, const void *buffer, size_t size) {
+    *crc = lfs2_crc(*crc, buffer, size);
+}
+
+static int lfs21_bd_read(lfs2_t *lfs2, lfs2_block_t block,
+        lfs2_off_t off, void *buffer, lfs2_size_t size) {
+    // if we ever do more than writes to alternating pairs,
+    // this may need to consider pcache
+    return lfs2_bd_read(lfs2, &lfs2->pcache, &lfs2->rcache, size,
+            block, off, buffer, size);
+}
+
+static int lfs21_bd_crc(lfs2_t *lfs2, lfs2_block_t block,
+        lfs2_off_t off, lfs2_size_t size, uint32_t *crc) {
+    for (lfs2_off_t i = 0; i < size; i++) {
+        uint8_t c;
+        int err = lfs21_bd_read(lfs2, block, off+i, &c, 1);
+        if (err) {
+            return err;
+        }
+
+        lfs21_crc(crc, &c, 1);
+    }
+
+    return 0;
+}
+
+
+/// Endian swapping functions ///
+static void lfs21_dir_fromle32(struct lfs21_disk_dir *d) {
+    d->rev     = lfs2_fromle32(d->rev);
+    d->size    = lfs2_fromle32(d->size);
+    d->tail[0] = lfs2_fromle32(d->tail[0]);
+    d->tail[1] = lfs2_fromle32(d->tail[1]);
+}
+
+static void lfs21_dir_tole32(struct lfs21_disk_dir *d) {
+    d->rev     = lfs2_tole32(d->rev);
+    d->size    = lfs2_tole32(d->size);
+    d->tail[0] = lfs2_tole32(d->tail[0]);
+    d->tail[1] = lfs2_tole32(d->tail[1]);
+}
+
+static void lfs21_entry_fromle32(struct lfs21_disk_entry *d) {
+    d->u.dir[0] = lfs2_fromle32(d->u.dir[0]);
+    d->u.dir[1] = lfs2_fromle32(d->u.dir[1]);
+}
+
+static void lfs21_entry_tole32(struct lfs21_disk_entry *d) {
+    d->u.dir[0] = lfs2_tole32(d->u.dir[0]);
+    d->u.dir[1] = lfs2_tole32(d->u.dir[1]);
+}
+
+static void lfs21_superblock_fromle32(struct lfs21_disk_superblock *d) {
+    d->root[0]     = lfs2_fromle32(d->root[0]);
+    d->root[1]     = lfs2_fromle32(d->root[1]);
+    d->block_size  = lfs2_fromle32(d->block_size);
+    d->block_count = lfs2_fromle32(d->block_count);
+    d->version     = lfs2_fromle32(d->version);
+}
+
+
+///// Metadata pair and directory operations ///
+static inline lfs2_size_t lfs21_entry_size(const lfs21_entry_t *entry) {
+    return 4 + entry->d.elen + entry->d.alen + entry->d.nlen;
+}
+
+static int lfs21_dir_fetch(lfs2_t *lfs2,
+        lfs21_dir_t *dir, const lfs2_block_t pair[2]) {
+    // copy out pair, otherwise may be aliasing dir
+    const lfs2_block_t tpair[2] = {pair[0], pair[1]};
+    bool valid = false;
+
+    // check both blocks for the most recent revision
+    for (int i = 0; i < 2; i++) {
+        struct lfs21_disk_dir test;
+        int err = lfs21_bd_read(lfs2, tpair[i], 0, &test, sizeof(test));
+        lfs21_dir_fromle32(&test);
+        if (err) {
+            if (err == LFS2_ERR_CORRUPT) {
+                continue;
+            }
+            return err;
+        }
+
+        if (valid && lfs2_scmp(test.rev, dir->d.rev) < 0) {
+            continue;
+        }
+
+        if ((0x7fffffff & test.size) < sizeof(test)+4 ||
+            (0x7fffffff & test.size) > lfs2->cfg->block_size) {
+            continue;
+        }
+
+        uint32_t crc = 0xffffffff;
+        lfs21_dir_tole32(&test);
+        lfs21_crc(&crc, &test, sizeof(test));
+        lfs21_dir_fromle32(&test);
+        err = lfs21_bd_crc(lfs2, tpair[i], sizeof(test),
+                (0x7fffffff & test.size) - sizeof(test), &crc);
+        if (err) {
+            if (err == LFS2_ERR_CORRUPT) {
+                continue;
+            }
+            return err;
+        }
+
+        if (crc != 0) {
+            continue;
+        }
+
+        valid = true;
+
+        // setup dir in case it's valid
+        dir->pair[0] = tpair[(i+0) % 2];
+        dir->pair[1] = tpair[(i+1) % 2];
+        dir->off = sizeof(dir->d);
+        dir->d = test;
+    }
+
+    if (!valid) {
+        LFS2_ERROR("Corrupted dir pair at {0x%"PRIx32", 0x%"PRIx32"}",
+                tpair[0], tpair[1]);
+        return LFS2_ERR_CORRUPT;
+    }
+
+    return 0;
+}
+
+static int lfs21_dir_next(lfs2_t *lfs2, lfs21_dir_t *dir, lfs21_entry_t *entry) {
+    while (dir->off + sizeof(entry->d) > (0x7fffffff & dir->d.size)-4) {
+        if (!(0x80000000 & dir->d.size)) {
+            entry->off = dir->off;
+            return LFS2_ERR_NOENT;
+        }
+
+        int err = lfs21_dir_fetch(lfs2, dir, dir->d.tail);
+        if (err) {
+            return err;
+        }
+
+        dir->off = sizeof(dir->d);
+        dir->pos += sizeof(dir->d) + 4;
+    }
+
+    int err = lfs21_bd_read(lfs2, dir->pair[0], dir->off,
+            &entry->d, sizeof(entry->d));
+    lfs21_entry_fromle32(&entry->d);
+    if (err) {
+        return err;
+    }
+
+    entry->off = dir->off;
+    dir->off += lfs21_entry_size(entry);
+    dir->pos += lfs21_entry_size(entry);
+    return 0;
+}
+
+/// littlefs v1 specific operations ///
+int lfs21_traverse(lfs2_t *lfs2, int (*cb)(void*, lfs2_block_t), void *data) {
+    if (lfs2_pair_isnull(lfs2->lfs21->root)) {
+        return 0;
+    }
+
+    // iterate over metadata pairs
+    lfs21_dir_t dir;
+    lfs21_entry_t entry;
+    lfs2_block_t cwd[2] = {0, 1};
+
+    while (true) {
+        for (int i = 0; i < 2; i++) {
+            int err = cb(data, cwd[i]);
+            if (err) {
+                return err;
+            }
+        }
+
+        int err = lfs21_dir_fetch(lfs2, &dir, cwd);
+        if (err) {
+            return err;
+        }
+
+        // iterate over contents
+        while (dir.off + sizeof(entry.d) <= (0x7fffffff & dir.d.size)-4) {
+            err = lfs21_bd_read(lfs2, dir.pair[0], dir.off,
+                    &entry.d, sizeof(entry.d));
+            lfs21_entry_fromle32(&entry.d);
+            if (err) {
+                return err;
+            }
+
+            dir.off += lfs21_entry_size(&entry);
+            if ((0x70 & entry.d.type) == (0x70 & LFS21_TYPE_REG)) {
+                err = lfs2_ctz_traverse(lfs2, NULL, &lfs2->rcache,
+                        entry.d.u.file.head, entry.d.u.file.size, cb, data);
+                if (err) {
+                    return err;
+                }
+            }
+        }
+
+        // we also need to check if we contain a threaded v2 directory
+        lfs2_mdir_t dir2 = {.split=true, .tail={cwd[0], cwd[1]}};
+        while (dir2.split) {
+            err = lfs2_dir_fetch(lfs2, &dir2, dir2.tail);
+            if (err) {
+                break;
+            }
+
+            for (int i = 0; i < 2; i++) {
+                err = cb(data, dir2.pair[i]);
+                if (err) {
+                    return err;
+                }
+            }
+        }
+
+        cwd[0] = dir.d.tail[0];
+        cwd[1] = dir.d.tail[1];
+
+        if (lfs2_pair_isnull(cwd)) {
+            break;
+        }
+    }
+
+    return 0;
+}
+
+static int lfs21_moved(lfs2_t *lfs2, const void *e) {
+    if (lfs2_pair_isnull(lfs2->lfs21->root)) {
+        return 0;
+    }
+
+    // skip superblock
+    lfs21_dir_t cwd;
+    int err = lfs21_dir_fetch(lfs2, &cwd, (const lfs2_block_t[2]){0, 1});
+    if (err) {
+        return err;
+    }
+
+    // iterate over all directory directory entries
+    lfs21_entry_t entry;
+    while (!lfs2_pair_isnull(cwd.d.tail)) {
+        err = lfs21_dir_fetch(lfs2, &cwd, cwd.d.tail);
+        if (err) {
+            return err;
+        }
+
+        while (true) {
+            err = lfs21_dir_next(lfs2, &cwd, &entry);
+            if (err && err != LFS2_ERR_NOENT) {
+                return err;
+            }
+
+            if (err == LFS2_ERR_NOENT) {
+                break;
+            }
+
+            if (!(0x80 & entry.d.type) &&
+                 memcmp(&entry.d.u, e, sizeof(entry.d.u)) == 0) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+/// Filesystem operations ///
+static int lfs21_mount(lfs2_t *lfs2, struct lfs21 *lfs21,
+        const struct lfs2_config *cfg) {
+    int err = 0;
+    {
+        err = lfs2_init(lfs2, cfg);
+        if (err) {
+            return err;
+        }
+
+        lfs2->lfs21 = lfs21;
+        lfs2->lfs21->root[0] = LFS2_BLOCK_NULL;
+        lfs2->lfs21->root[1] = LFS2_BLOCK_NULL;
+
+        // setup free lookahead
+        lfs2->free.off = 0;
+        lfs2->free.size = 0;
+        lfs2->free.i = 0;
+        lfs2_alloc_ack(lfs2);
+
+        // load superblock
+        lfs21_dir_t dir;
+        lfs21_superblock_t superblock;
+        err = lfs21_dir_fetch(lfs2, &dir, (const lfs2_block_t[2]){0, 1});
+        if (err && err != LFS2_ERR_CORRUPT) {
+            goto cleanup;
+        }
+
+        if (!err) {
+            err = lfs21_bd_read(lfs2, dir.pair[0], sizeof(dir.d),
+                    &superblock.d, sizeof(superblock.d));
+            lfs21_superblock_fromle32(&superblock.d);
+            if (err) {
+                goto cleanup;
+            }
+
+            lfs2->lfs21->root[0] = superblock.d.root[0];
+            lfs2->lfs21->root[1] = superblock.d.root[1];
+        }
+
+        if (err || memcmp(superblock.d.magic, "littlefs", 8) != 0) {
+            LFS2_ERROR("Invalid superblock at {0x%"PRIx32", 0x%"PRIx32"}",
+                    0, 1);
+            err = LFS2_ERR_CORRUPT;
+            goto cleanup;
+        }
+
+        uint16_t major_version = (0xffff & (superblock.d.version >> 16));
+        uint16_t minor_version = (0xffff & (superblock.d.version >>  0));
+        if ((major_version != LFS21_DISK_VERSION_MAJOR ||
+             minor_version > LFS21_DISK_VERSION_MINOR)) {
+            LFS2_ERROR("Invalid version v%d.%d", major_version, minor_version);
+            err = LFS2_ERR_INVAL;
+            goto cleanup;
+        }
+
+        return 0;
+    }
+
+cleanup:
+    lfs2_deinit(lfs2);
+    return err;
+}
+
+static int lfs21_unmount(lfs2_t *lfs2) {
+    return lfs2_deinit(lfs2);
+}
+
+/// v1 migration ///
+static int lfs2_rawmigrate(lfs2_t *lfs2, const struct lfs2_config *cfg) {
+    struct lfs21 lfs21;
+    int err = lfs21_mount(lfs2, &lfs21, cfg);
+    if (err) {
+        return err;
+    }
+
+    {
+        // iterate through each directory, copying over entries
+        // into new directory
+        lfs21_dir_t dir1;
+        lfs2_mdir_t dir2;
+        dir1.d.tail[0] = lfs2->lfs21->root[0];
+        dir1.d.tail[1] = lfs2->lfs21->root[1];
+        while (!lfs2_pair_isnull(dir1.d.tail)) {
+            // iterate old dir
+            err = lfs21_dir_fetch(lfs2, &dir1, dir1.d.tail);
+            if (err) {
+                goto cleanup;
+            }
+
+            // create new dir and bind as temporary pretend root
+            err = lfs2_dir_alloc(lfs2, &dir2);
+            if (err) {
+                goto cleanup;
+            }
+
+            dir2.rev = dir1.d.rev;
+            dir1.head[0] = dir1.pair[0];
+            dir1.head[1] = dir1.pair[1];
+            lfs2->root[0] = dir2.pair[0];
+            lfs2->root[1] = dir2.pair[1];
+
+            err = lfs2_dir_commit(lfs2, &dir2, NULL, 0);
+            if (err) {
+                goto cleanup;
+            }
+
+            while (true) {
+                lfs21_entry_t entry1;
+                err = lfs21_dir_next(lfs2, &dir1, &entry1);
+                if (err && err != LFS2_ERR_NOENT) {
+                    goto cleanup;
+                }
+
+                if (err == LFS2_ERR_NOENT) {
+                    break;
+                }
+
+                // check that entry has not been moved
+                if (entry1.d.type & 0x80) {
+                    int moved = lfs21_moved(lfs2, &entry1.d.u);
+                    if (moved < 0) {
+                        err = moved;
+                        goto cleanup;
+                    }
+
+                    if (moved) {
+                        continue;
+                    }
+
+                    entry1.d.type &= ~0x80;
+                }
+
+                // also fetch name
+                char name[LFS2_NAME_MAX+1];
+                memset(name, 0, sizeof(name));
+                err = lfs21_bd_read(lfs2, dir1.pair[0],
+                        entry1.off + 4+entry1.d.elen+entry1.d.alen,
+                        name, entry1.d.nlen);
+                if (err) {
+                    goto cleanup;
+                }
+
+                bool isdir = (entry1.d.type == LFS21_TYPE_DIR);
+
+                // create entry in new dir
+                err = lfs2_dir_fetch(lfs2, &dir2, lfs2->root);
+                if (err) {
+                    goto cleanup;
+                }
+
+                uint16_t id;
+                err = lfs2_dir_find(lfs2, &dir2, &(const char*){name}, &id);
+                if (!(err == LFS2_ERR_NOENT && id != 0x3ff)) {
+                    err = (err < 0) ? err : LFS2_ERR_EXIST;
+                    goto cleanup;
+                }
+
+                lfs21_entry_tole32(&entry1.d);
+                err = lfs2_dir_commit(lfs2, &dir2, LFS2_MKATTRS(
+                        {LFS2_MKTAG(LFS2_TYPE_CREATE, id, 0)},
+                        {LFS2_MKTAG_IF_ELSE(isdir,
+                            LFS2_TYPE_DIR, id, entry1.d.nlen,
+                            LFS2_TYPE_REG, id, entry1.d.nlen),
+                                name},
+                        {LFS2_MKTAG_IF_ELSE(isdir,
+                            LFS2_TYPE_DIRSTRUCT, id, sizeof(entry1.d.u),
+                            LFS2_TYPE_CTZSTRUCT, id, sizeof(entry1.d.u)),
+                                &entry1.d.u}));
+                lfs21_entry_fromle32(&entry1.d);
+                if (err) {
+                    goto cleanup;
+                }
+            }
+
+            if (!lfs2_pair_isnull(dir1.d.tail)) {
+                // find last block and update tail to thread into fs
+                err = lfs2_dir_fetch(lfs2, &dir2, lfs2->root);
+                if (err) {
+                    goto cleanup;
+                }
+
+                while (dir2.split) {
+                    err = lfs2_dir_fetch(lfs2, &dir2, dir2.tail);
+                    if (err) {
+                        goto cleanup;
+                    }
+                }
+
+                lfs2_pair_tole32(dir2.pair);
+                err = lfs2_dir_commit(lfs2, &dir2, LFS2_MKATTRS(
+                        {LFS2_MKTAG(LFS2_TYPE_SOFTTAIL, 0x3ff, 8), dir1.d.tail}));
+                lfs2_pair_fromle32(dir2.pair);
+                if (err) {
+                    goto cleanup;
+                }
+            }
+
+            // Copy over first block to thread into fs. Unfortunately
+            // if this fails there is not much we can do.
+            LFS2_DEBUG("Migrating {0x%"PRIx32", 0x%"PRIx32"} "
+                        "-> {0x%"PRIx32", 0x%"PRIx32"}",
+                    lfs2->root[0], lfs2->root[1], dir1.head[0], dir1.head[1]);
+
+            err = lfs2_bd_erase(lfs2, dir1.head[1]);
+            if (err) {
+                goto cleanup;
+            }
+
+            err = lfs2_dir_fetch(lfs2, &dir2, lfs2->root);
+            if (err) {
+                goto cleanup;
+            }
+
+            for (lfs2_off_t i = 0; i < dir2.off; i++) {
+                uint8_t dat;
+                err = lfs2_bd_read(lfs2,
+                        NULL, &lfs2->rcache, dir2.off,
+                        dir2.pair[0], i, &dat, 1);
+                if (err) {
+                    goto cleanup;
+                }
+
+                err = lfs2_bd_prog(lfs2,
+                        &lfs2->pcache, &lfs2->rcache, true,
+                        dir1.head[1], i, &dat, 1);
+                if (err) {
+                    goto cleanup;
+                }
+            }
+
+            err = lfs2_bd_flush(lfs2, &lfs2->pcache, &lfs2->rcache, true);
+            if (err) {
+                goto cleanup;
+            }
+        }
+
+        // Create new superblock. This marks a successful migration!
+        err = lfs21_dir_fetch(lfs2, &dir1, (const lfs2_block_t[2]){0, 1});
+        if (err) {
+            goto cleanup;
+        }
+
+        dir2.pair[0] = dir1.pair[0];
+        dir2.pair[1] = dir1.pair[1];
+        dir2.rev = dir1.d.rev;
+        dir2.off = sizeof(dir2.rev);
+        dir2.etag = 0xffffffff;
+        dir2.count = 0;
+        dir2.tail[0] = lfs2->lfs21->root[0];
+        dir2.tail[1] = lfs2->lfs21->root[1];
+        dir2.erased = false;
+        dir2.split = true;
+
+        lfs2_superblock_t superblock = {
+            .version     = LFS2_DISK_VERSION,
+            .block_size  = lfs2->cfg->block_size,
+            .block_count = lfs2->cfg->block_count,
+            .name_max    = lfs2->name_max,
+            .file_max    = lfs2->file_max,
+            .attr_max    = lfs2->attr_max,
+        };
+
+        lfs2_superblock_tole32(&superblock);
+        err = lfs2_dir_commit(lfs2, &dir2, LFS2_MKATTRS(
+                {LFS2_MKTAG(LFS2_TYPE_CREATE, 0, 0)},
+                {LFS2_MKTAG(LFS2_TYPE_SUPERBLOCK, 0, 8), "littlefs"},
+                {LFS2_MKTAG(LFS2_TYPE_INLINESTRUCT, 0, sizeof(superblock)),
+                    &superblock}));
+        if (err) {
+            goto cleanup;
+        }
+
+        // sanity check that fetch works
+        err = lfs2_dir_fetch(lfs2, &dir2, (const lfs2_block_t[2]){0, 1});
+        if (err) {
+            goto cleanup;
+        }
+
+        // force compaction to prevent accidentally mounting v1
+        dir2.erased = false;
+        err = lfs2_dir_commit(lfs2, &dir2, NULL, 0);
+        if (err) {
+            goto cleanup;
+        }
+    }
+
+cleanup:
+    lfs21_unmount(lfs2);
+    return err;
+}
+
+#endif
+
+
+/// Public API wrappers ///
+
+// Here we can add tracing/thread safety easily
+
+// Thread-safe wrappers if enabled
+#ifdef LFS2_THREADSAFE
+#define LFS2_LOCK(cfg)   cfg->lock(cfg)
+#define LFS2_UNLOCK(cfg) cfg->unlock(cfg)
+#else
+#define LFS2_LOCK(cfg)   ((void)cfg, 0)
+#define LFS2_UNLOCK(cfg) ((void)cfg)
+#endif
+
+// Public API
+#ifndef LFS2_READONLY
+int lfs2_format(lfs2_t *lfs2, const struct lfs2_config *cfg) {
+    int err = LFS2_LOCK(cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_format(%p, %p {.context=%p, "
+                ".read=%p, .prog=%p, .erase=%p, .sync=%p, "
+                ".read_size=%"PRIu32", .prog_size=%"PRIu32", "
+                ".block_size=%"PRIu32", .block_count=%"PRIu32", "
+                ".block_cycles=%"PRIu32", .cache_size=%"PRIu32", "
+                ".lookahead_size=%"PRIu32", .read_buffer=%p, "
+                ".prog_buffer=%p, .lookahead_buffer=%p, "
+                ".name_max=%"PRIu32", .file_max=%"PRIu32", "
+                ".attr_max=%"PRIu32"})",
+            (void*)lfs2, (void*)cfg, cfg->context,
+            (void*)(uintptr_t)cfg->read, (void*)(uintptr_t)cfg->prog,
+            (void*)(uintptr_t)cfg->erase, (void*)(uintptr_t)cfg->sync,
+            cfg->read_size, cfg->prog_size, cfg->block_size, cfg->block_count,
+            cfg->block_cycles, cfg->cache_size, cfg->lookahead_size,
+            cfg->read_buffer, cfg->prog_buffer, cfg->lookahead_buffer,
+            cfg->name_max, cfg->file_max, cfg->attr_max);
+
+    err = lfs2_rawformat(lfs2, cfg);
+
+    LFS2_TRACE("lfs2_format -> %d", err);
+    LFS2_UNLOCK(cfg);
+    return err;
+}
+#endif
+
+int lfs2_mount(lfs2_t *lfs2, const struct lfs2_config *cfg) {
+    int err = LFS2_LOCK(cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_mount(%p, %p {.context=%p, "
+                ".read=%p, .prog=%p, .erase=%p, .sync=%p, "
+                ".read_size=%"PRIu32", .prog_size=%"PRIu32", "
+                ".block_size=%"PRIu32", .block_count=%"PRIu32", "
+                ".block_cycles=%"PRIu32", .cache_size=%"PRIu32", "
+                ".lookahead_size=%"PRIu32", .read_buffer=%p, "
+                ".prog_buffer=%p, .lookahead_buffer=%p, "
+                ".name_max=%"PRIu32", .file_max=%"PRIu32", "
+                ".attr_max=%"PRIu32"})",
+            (void*)lfs2, (void*)cfg, cfg->context,
+            (void*)(uintptr_t)cfg->read, (void*)(uintptr_t)cfg->prog,
+            (void*)(uintptr_t)cfg->erase, (void*)(uintptr_t)cfg->sync,
+            cfg->read_size, cfg->prog_size, cfg->block_size, cfg->block_count,
+            cfg->block_cycles, cfg->cache_size, cfg->lookahead_size,
+            cfg->read_buffer, cfg->prog_buffer, cfg->lookahead_buffer,
+            cfg->name_max, cfg->file_max, cfg->attr_max);
+
+    err = lfs2_rawmount(lfs2, cfg);
+
+    LFS2_TRACE("lfs2_mount -> %d", err);
+    LFS2_UNLOCK(cfg);
+    return err;
+}
+
+int lfs2_unmount(lfs2_t *lfs2) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_unmount(%p)", (void*)lfs2);
+
+    err = lfs2_rawunmount(lfs2);
+
+    LFS2_TRACE("lfs2_unmount -> %d", err);
+    LFS2_UNLOCK(lfs2->cfg);
+    return err;
+}
+
+#ifndef LFS2_READONLY
+int lfs2_remove(lfs2_t *lfs2, const char *path) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_remove(%p, \"%s\")", (void*)lfs2, path);
+
+    err = lfs2_rawremove(lfs2, path);
+
+    LFS2_TRACE("lfs2_remove -> %d", err);
+    LFS2_UNLOCK(lfs2->cfg);
+    return err;
+}
+#endif
+
+#ifndef LFS2_READONLY
+int lfs2_rename(lfs2_t *lfs2, const char *oldpath, const char *newpath) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_rename(%p, \"%s\", \"%s\")", (void*)lfs2, oldpath, newpath);
+
+    err = lfs2_rawrename(lfs2, oldpath, newpath);
+
+    LFS2_TRACE("lfs2_rename -> %d", err);
+    LFS2_UNLOCK(lfs2->cfg);
+    return err;
+}
+#endif
+
+int lfs2_stat(lfs2_t *lfs2, const char *path, struct lfs2_info *info) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_stat(%p, \"%s\", %p)", (void*)lfs2, path, (void*)info);
+
+    err = lfs2_rawstat(lfs2, path, info);
+
+    LFS2_TRACE("lfs2_stat -> %d", err);
+    LFS2_UNLOCK(lfs2->cfg);
+    return err;
+}
+
+lfs2_ssize_t lfs2_getattr(lfs2_t *lfs2, const char *path,
+        uint8_t type, void *buffer, lfs2_size_t size) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_getattr(%p, \"%s\", %"PRIu8", %p, %"PRIu32")",
+            (void*)lfs2, path, type, buffer, size);
+
+    lfs2_ssize_t res = lfs2_rawgetattr(lfs2, path, type, buffer, size);
+
+    LFS2_TRACE("lfs2_getattr -> %"PRId32, res);
+    LFS2_UNLOCK(lfs2->cfg);
+    return res;
+}
+
+#ifndef LFS2_READONLY
+int lfs2_setattr(lfs2_t *lfs2, const char *path,
+        uint8_t type, const void *buffer, lfs2_size_t size) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_setattr(%p, \"%s\", %"PRIu8", %p, %"PRIu32")",
+            (void*)lfs2, path, type, buffer, size);
+
+    err = lfs2_rawsetattr(lfs2, path, type, buffer, size);
+
+    LFS2_TRACE("lfs2_setattr -> %d", err);
+    LFS2_UNLOCK(lfs2->cfg);
+    return err;
+}
+#endif
+
+#ifndef LFS2_READONLY
+int lfs2_removeattr(lfs2_t *lfs2, const char *path, uint8_t type) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_removeattr(%p, \"%s\", %"PRIu8")", (void*)lfs2, path, type);
+
+    err = lfs2_rawremoveattr(lfs2, path, type);
+
+    LFS2_TRACE("lfs2_removeattr -> %d", err);
+    LFS2_UNLOCK(lfs2->cfg);
+    return err;
+}
+#endif
+
+int lfs2_file_open(lfs2_t *lfs2, lfs2_file_t *file, const char *path, int flags) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_file_open(%p, %p, \"%s\", %x)",
+            (void*)lfs2, (void*)file, path, flags);
+    LFS2_ASSERT(!lfs2_mlist_isopen(lfs2->mlist, (struct lfs2_mlist*)file));
+
+    err = lfs2_file_rawopen(lfs2, file, path, flags);
+
+    LFS2_TRACE("lfs2_file_open -> %d", err);
+    LFS2_UNLOCK(lfs2->cfg);
+    return err;
+}
+
+int lfs2_file_opencfg(lfs2_t *lfs2, lfs2_file_t *file,
+        const char *path, int flags,
+        const struct lfs2_file_config *cfg) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_file_opencfg(%p, %p, \"%s\", %x, %p {"
+                 ".buffer=%p, .attrs=%p, .attr_count=%"PRIu32"})",
+            (void*)lfs2, (void*)file, path, flags,
+            (void*)cfg, cfg->buffer, (void*)cfg->attrs, cfg->attr_count);
+    LFS2_ASSERT(!lfs2_mlist_isopen(lfs2->mlist, (struct lfs2_mlist*)file));
+
+    err = lfs2_file_rawopencfg(lfs2, file, path, flags, cfg);
+
+    LFS2_TRACE("lfs2_file_opencfg -> %d", err);
+    LFS2_UNLOCK(lfs2->cfg);
+    return err;
+}
+
+int lfs2_file_close(lfs2_t *lfs2, lfs2_file_t *file) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_file_close(%p, %p)", (void*)lfs2, (void*)file);
+    LFS2_ASSERT(lfs2_mlist_isopen(lfs2->mlist, (struct lfs2_mlist*)file));
+
+    err = lfs2_file_rawclose(lfs2, file);
+
+    LFS2_TRACE("lfs2_file_close -> %d", err);
+    LFS2_UNLOCK(lfs2->cfg);
+    return err;
+}
+
+#ifndef LFS2_READONLY
+int lfs2_file_sync(lfs2_t *lfs2, lfs2_file_t *file) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_file_sync(%p, %p)", (void*)lfs2, (void*)file);
+    LFS2_ASSERT(lfs2_mlist_isopen(lfs2->mlist, (struct lfs2_mlist*)file));
+
+    err = lfs2_file_rawsync(lfs2, file);
+
+    LFS2_TRACE("lfs2_file_sync -> %d", err);
+    LFS2_UNLOCK(lfs2->cfg);
+    return err;
+}
+#endif
+
+lfs2_ssize_t lfs2_file_read(lfs2_t *lfs2, lfs2_file_t *file,
+        void *buffer, lfs2_size_t size) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_file_read(%p, %p, %p, %"PRIu32")",
+            (void*)lfs2, (void*)file, buffer, size);
+    LFS2_ASSERT(lfs2_mlist_isopen(lfs2->mlist, (struct lfs2_mlist*)file));
+
+    lfs2_ssize_t res = lfs2_file_rawread(lfs2, file, buffer, size);
+
+    LFS2_TRACE("lfs2_file_read -> %"PRId32, res);
+    LFS2_UNLOCK(lfs2->cfg);
+    return res;
+}
+
+#ifndef LFS2_READONLY
+lfs2_ssize_t lfs2_file_write(lfs2_t *lfs2, lfs2_file_t *file,
+        const void *buffer, lfs2_size_t size) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_file_write(%p, %p, %p, %"PRIu32")",
+            (void*)lfs2, (void*)file, buffer, size);
+    LFS2_ASSERT(lfs2_mlist_isopen(lfs2->mlist, (struct lfs2_mlist*)file));
+
+    lfs2_ssize_t res = lfs2_file_rawwrite(lfs2, file, buffer, size);
+
+    LFS2_TRACE("lfs2_file_write -> %"PRId32, res);
+    LFS2_UNLOCK(lfs2->cfg);
+    return res;
+}
+#endif
+
+lfs2_soff_t lfs2_file_seek(lfs2_t *lfs2, lfs2_file_t *file,
+        lfs2_soff_t off, int whence) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_file_seek(%p, %p, %"PRId32", %d)",
+            (void*)lfs2, (void*)file, off, whence);
+    LFS2_ASSERT(lfs2_mlist_isopen(lfs2->mlist, (struct lfs2_mlist*)file));
+
+    lfs2_soff_t res = lfs2_file_rawseek(lfs2, file, off, whence);
+
+    LFS2_TRACE("lfs2_file_seek -> %"PRId32, res);
+    LFS2_UNLOCK(lfs2->cfg);
+    return res;
+}
+
+#ifndef LFS2_READONLY
+int lfs2_file_truncate(lfs2_t *lfs2, lfs2_file_t *file, lfs2_off_t size) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_file_truncate(%p, %p, %"PRIu32")",
+            (void*)lfs2, (void*)file, size);
+    LFS2_ASSERT(lfs2_mlist_isopen(lfs2->mlist, (struct lfs2_mlist*)file));
+
+    err = lfs2_file_rawtruncate(lfs2, file, size);
+
+    LFS2_TRACE("lfs2_file_truncate -> %d", err);
+    LFS2_UNLOCK(lfs2->cfg);
+    return err;
+}
+#endif
+
+lfs2_soff_t lfs2_file_tell(lfs2_t *lfs2, lfs2_file_t *file) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_file_tell(%p, %p)", (void*)lfs2, (void*)file);
+    LFS2_ASSERT(lfs2_mlist_isopen(lfs2->mlist, (struct lfs2_mlist*)file));
+
+    lfs2_soff_t res = lfs2_file_rawtell(lfs2, file);
+
+    LFS2_TRACE("lfs2_file_tell -> %"PRId32, res);
+    LFS2_UNLOCK(lfs2->cfg);
+    return res;
+}
+
+int lfs2_file_rewind(lfs2_t *lfs2, lfs2_file_t *file) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_file_rewind(%p, %p)", (void*)lfs2, (void*)file);
+
+    err = lfs2_file_rawrewind(lfs2, file);
+
+    LFS2_TRACE("lfs2_file_rewind -> %d", err);
+    LFS2_UNLOCK(lfs2->cfg);
+    return err;
+}
+
+lfs2_soff_t lfs2_file_size(lfs2_t *lfs2, lfs2_file_t *file) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_file_size(%p, %p)", (void*)lfs2, (void*)file);
+    LFS2_ASSERT(lfs2_mlist_isopen(lfs2->mlist, (struct lfs2_mlist*)file));
+
+    lfs2_soff_t res = lfs2_file_rawsize(lfs2, file);
+
+    LFS2_TRACE("lfs2_file_size -> %"PRId32, res);
+    LFS2_UNLOCK(lfs2->cfg);
+    return res;
+}
+
+#ifndef LFS2_READONLY
+int lfs2_mkdir(lfs2_t *lfs2, const char *path) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_mkdir(%p, \"%s\")", (void*)lfs2, path);
+
+    err = lfs2_rawmkdir(lfs2, path);
+
+    LFS2_TRACE("lfs2_mkdir -> %d", err);
+    LFS2_UNLOCK(lfs2->cfg);
+    return err;
+}
+#endif
+
+int lfs2_dir_open(lfs2_t *lfs2, lfs2_dir_t *dir, const char *path) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_dir_open(%p, %p, \"%s\")", (void*)lfs2, (void*)dir, path);
+    LFS2_ASSERT(!lfs2_mlist_isopen(lfs2->mlist, (struct lfs2_mlist*)dir));
+
+    err = lfs2_dir_rawopen(lfs2, dir, path);
+
+    LFS2_TRACE("lfs2_dir_open -> %d", err);
+    LFS2_UNLOCK(lfs2->cfg);
+    return err;
+}
+
+int lfs2_dir_close(lfs2_t *lfs2, lfs2_dir_t *dir) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_dir_close(%p, %p)", (void*)lfs2, (void*)dir);
+
+    err = lfs2_dir_rawclose(lfs2, dir);
+
+    LFS2_TRACE("lfs2_dir_close -> %d", err);
+    LFS2_UNLOCK(lfs2->cfg);
+    return err;
+}
+
+int lfs2_dir_read(lfs2_t *lfs2, lfs2_dir_t *dir, struct lfs2_info *info) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_dir_read(%p, %p, %p)",
+            (void*)lfs2, (void*)dir, (void*)info);
+
+    err = lfs2_dir_rawread(lfs2, dir, info);
+
+    LFS2_TRACE("lfs2_dir_read -> %d", err);
+    LFS2_UNLOCK(lfs2->cfg);
+    return err;
+}
+
+int lfs2_dir_seek(lfs2_t *lfs2, lfs2_dir_t *dir, lfs2_off_t off) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_dir_seek(%p, %p, %"PRIu32")",
+            (void*)lfs2, (void*)dir, off);
+
+    err = lfs2_dir_rawseek(lfs2, dir, off);
+
+    LFS2_TRACE("lfs2_dir_seek -> %d", err);
+    LFS2_UNLOCK(lfs2->cfg);
+    return err;
+}
+
+lfs2_soff_t lfs2_dir_tell(lfs2_t *lfs2, lfs2_dir_t *dir) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_dir_tell(%p, %p)", (void*)lfs2, (void*)dir);
+
+    lfs2_soff_t res = lfs2_dir_rawtell(lfs2, dir);
+
+    LFS2_TRACE("lfs2_dir_tell -> %"PRId32, res);
+    LFS2_UNLOCK(lfs2->cfg);
+    return res;
+}
+
+int lfs2_dir_rewind(lfs2_t *lfs2, lfs2_dir_t *dir) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_dir_rewind(%p, %p)", (void*)lfs2, (void*)dir);
+
+    err = lfs2_dir_rawrewind(lfs2, dir);
+
+    LFS2_TRACE("lfs2_dir_rewind -> %d", err);
+    LFS2_UNLOCK(lfs2->cfg);
+    return err;
+}
+
+lfs2_ssize_t lfs2_fs_size(lfs2_t *lfs2) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_fs_size(%p)", (void*)lfs2);
+
+    lfs2_ssize_t res = lfs2_fs_rawsize(lfs2);
+
+    LFS2_TRACE("lfs2_fs_size -> %"PRId32, res);
+    LFS2_UNLOCK(lfs2->cfg);
+    return res;
+}
+
+int lfs2_fs_traverse(lfs2_t *lfs2, int (*cb)(void *, lfs2_block_t), void *data) {
+    int err = LFS2_LOCK(lfs2->cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_fs_traverse(%p, %p, %p)",
+            (void*)lfs2, (void*)(uintptr_t)cb, data);
+
+    err = lfs2_fs_rawtraverse(lfs2, cb, data, true);
+
+    LFS2_TRACE("lfs2_fs_traverse -> %d", err);
+    LFS2_UNLOCK(lfs2->cfg);
+    return err;
+}
+
+#ifdef LFS2_MIGRATE
+int lfs2_migrate(lfs2_t *lfs2, const struct lfs2_config *cfg) {
+    int err = LFS2_LOCK(cfg);
+    if (err) {
+        return err;
+    }
+    LFS2_TRACE("lfs2_migrate(%p, %p {.context=%p, "
+                ".read=%p, .prog=%p, .erase=%p, .sync=%p, "
+                ".read_size=%"PRIu32", .prog_size=%"PRIu32", "
+                ".block_size=%"PRIu32", .block_count=%"PRIu32", "
+                ".block_cycles=%"PRIu32", .cache_size=%"PRIu32", "
+                ".lookahead_size=%"PRIu32", .read_buffer=%p, "
+                ".prog_buffer=%p, .lookahead_buffer=%p, "
+                ".name_max=%"PRIu32", .file_max=%"PRIu32", "
+                ".attr_max=%"PRIu32"})",
+            (void*)lfs2, (void*)cfg, cfg->context,
+            (void*)(uintptr_t)cfg->read, (void*)(uintptr_t)cfg->prog,
+            (void*)(uintptr_t)cfg->erase, (void*)(uintptr_t)cfg->sync,
+            cfg->read_size, cfg->prog_size, cfg->block_size, cfg->block_count,
+            cfg->block_cycles, cfg->cache_size, cfg->lookahead_size,
+            cfg->read_buffer, cfg->prog_buffer, cfg->lookahead_buffer,
+            cfg->name_max, cfg->file_max, cfg->attr_max);
+
+    err = lfs2_rawmigrate(lfs2, cfg);
+
+    LFS2_TRACE("lfs2_migrate -> %d", err);
+    LFS2_UNLOCK(cfg);
+    return err;
+}
+#endif
+
+// --------------------- lfs2_util.c ----------------- //
+#include "lib/littlefs/lfs2.h"
+
+// Only compile if user does not provide custom config
+#ifndef LFS2_CONFIG
+
+
+// Software CRC implementation with small lookup table
+uint32_t lfs2_crc(uint32_t crc, const void *buffer, size_t size) {
+    static const uint32_t rtable[16] = {
+        0x00000000, 0x1db71064, 0x3b6e20c8, 0x26d930ac,
+        0x76dc4190, 0x6b6b51f4, 0x4db26158, 0x5005713c,
+        0xedb88320, 0xf00f9344, 0xd6d6a3e8, 0xcb61b38c,
+        0x9b64c2b0, 0x86d3d2d4, 0xa00ae278, 0xbdbdf21c,
+    };
+
+    const uint8_t *data = buffer;
+
+    for (size_t i = 0; i < size; i++) {
+        crc = (crc >> 4) ^ rtable[(crc ^ (data[i] >> 0)) & 0xf];
+        crc = (crc >> 4) ^ rtable[(crc ^ (data[i] >> 4)) & 0xf];
+    }
+
+    return crc;
+}
+
+
+#endif
+
+// ---------------------- shared/runtime/pyexec.c --------------- //
+
+
+#include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
+
+#include "py/compile.h"
+#include "py/runtime.h"
+#include "py/repl.h"
+#include "py/gc.h"
+#include "py/frozenmod.h"
+#include "py/mphal.h"
+#if MICROPY_HW_ENABLE_USB
+#include "irq.h"
+#include "usb.h"
+#endif
+#include "shared/readline/readline.h"
+#include "shared/runtime/pyexec.h"
+#include "genhdr/mpversion.h"
+
+pyexec_mode_kind_t pyexec_mode_kind = PYEXEC_MODE_FRIENDLY_REPL;
+int pyexec_system_exit = 0;
+
+#if MICROPY_REPL_INFO
+STATIC bool repl_display_debugging_info = 0;
+#endif
+
+#define EXEC_FLAG_PRINT_EOF             (1 << 0)
+#define EXEC_FLAG_ALLOW_DEBUGGING       (1 << 1)
+#define EXEC_FLAG_IS_REPL               (1 << 2)
+#define EXEC_FLAG_SOURCE_IS_RAW_CODE    (1 << 3)
+#define EXEC_FLAG_SOURCE_IS_VSTR        (1 << 4)
+#define EXEC_FLAG_SOURCE_IS_FILENAME    (1 << 5)
+#define EXEC_FLAG_SOURCE_IS_READER      (1 << 6)
+
+// parses, compiles and executes the code in the lexer
+// frees the lexer before returning
+// EXEC_FLAG_PRINT_EOF prints 2 EOF chars: 1 after normal output, 1 after exception output
+// EXEC_FLAG_ALLOW_DEBUGGING allows debugging info to be printed after executing the code
+// EXEC_FLAG_IS_REPL is used for REPL inputs (flag passed on to mp_compile)
+STATIC int parse_compile_execute(const void *source, mp_parse_input_kind_t input_kind, mp_uint_t exec_flags) {
+    int ret = 0;
+    #if MICROPY_REPL_INFO
+    uint32_t start = 0;
+    #endif
+
+    #ifdef MICROPY_BOARD_BEFORE_PYTHON_EXEC
+    MICROPY_BOARD_BEFORE_PYTHON_EXEC(input_kind, exec_flags);
+    #endif
+
+    // by default a SystemExit exception returns 0
+    pyexec_system_exit = 0;
+
+    nlr_buf_t nlr;
+    nlr.ret_val = NULL;
+    if (nlr_push(&nlr) == 0) {
+        mp_obj_t module_fun;
+        #if MICROPY_MODULE_FROZEN_MPY
+        if (exec_flags & EXEC_FLAG_SOURCE_IS_RAW_CODE) {
+            // source is a raw_code object, create the function
+            const mp_frozen_module_t *frozen = source;
+            mp_module_context_t *ctx = m_new_obj(mp_module_context_t);
+            ctx->module.globals = mp_globals_get();
+            ctx->constants = frozen->constants;
+            module_fun = mp_make_function_from_raw_code(frozen->rc, ctx, NULL);
+        } else
+        #endif
+        {
+            #if MICROPY_ENABLE_COMPILER
+            mp_lexer_t *lex;
+            if (exec_flags & EXEC_FLAG_SOURCE_IS_VSTR) {
+                const vstr_t *vstr = source;
+                lex = mp_lexer_new_from_str_len(MP_QSTR__lt_stdin_gt_, vstr->buf, vstr->len, 0);
+            } else if (exec_flags & EXEC_FLAG_SOURCE_IS_READER) {
+                lex = mp_lexer_new(MP_QSTR__lt_stdin_gt_, *(mp_reader_t *)source);
+            } else if (exec_flags & EXEC_FLAG_SOURCE_IS_FILENAME) {
+                lex = mp_lexer_new_from_file(source);
+            } else {
+                lex = (mp_lexer_t *)source;
+            }
+            // source is a lexer, parse and compile the script
+            qstr source_name = lex->source_name;
+            mp_parse_tree_t parse_tree = mp_parse(lex, input_kind);
+            module_fun = mp_compile(&parse_tree, source_name, exec_flags & EXEC_FLAG_IS_REPL);
+            #else
+            mp_raise_msg(&mp_type_RuntimeError, MP_ERROR_TEXT("script compilation not supported"));
+            #endif
+        }
+
+        // execute code
+        mp_hal_set_interrupt_char(CHAR_CTRL_C); // allow ctrl-C to interrupt us
+        #if MICROPY_REPL_INFO
+        start = mp_hal_ticks_ms();
+        #endif
+        mp_call_function_0(module_fun);
+        mp_hal_set_interrupt_char(-1); // disable interrupt
+        mp_handle_pending(true); // handle any pending exceptions (and any callbacks)
+        nlr_pop();
+        ret = 1;
+        if (exec_flags & EXEC_FLAG_PRINT_EOF) {
+            mp_hal_stdout_tx_strn("\x04", 1);
+        }
+    } else {
+        // uncaught exception
+        mp_hal_set_interrupt_char(-1); // disable interrupt
+        mp_handle_pending(false); // clear any pending exceptions (and run any callbacks)
+
+        if (exec_flags & EXEC_FLAG_SOURCE_IS_READER) {
+            const mp_reader_t *reader = source;
+            reader->close(reader->data);
+        }
+
+        // print EOF after normal output
+        if (exec_flags & EXEC_FLAG_PRINT_EOF) {
+            mp_hal_stdout_tx_strn("\x04", 1);
+        }
+
+        // check for SystemExit
+        if (mp_obj_is_subclass_fast(MP_OBJ_FROM_PTR(((mp_obj_base_t *)nlr.ret_val)->type), MP_OBJ_FROM_PTR(&mp_type_SystemExit))) {
+            // at the moment, the value of SystemExit is unused
+            ret = pyexec_system_exit;
+        } else {
+            mp_obj_print_exception(&mp_plat_print, MP_OBJ_FROM_PTR(nlr.ret_val));
+            ret = 0;
+        }
+    }
+
+    #if MICROPY_REPL_INFO
+    // display debugging info if wanted
+    if ((exec_flags & EXEC_FLAG_ALLOW_DEBUGGING) && repl_display_debugging_info) {
+        mp_uint_t ticks = mp_hal_ticks_ms() - start; // TODO implement a function that does this properly
+        printf("took " UINT_FMT " ms\n", ticks);
+        // qstr info
+        {
+            size_t n_pool, n_qstr, n_str_data_bytes, n_total_bytes;
+            qstr_pool_info(&n_pool, &n_qstr, &n_str_data_bytes, &n_total_bytes);
+            printf("qstr:\n  n_pool=%u\n  n_qstr=%u\n  "
+                "n_str_data_bytes=%u\n  n_total_bytes=%u\n",
+                (unsigned)n_pool, (unsigned)n_qstr, (unsigned)n_str_data_bytes, (unsigned)n_total_bytes);
+        }
+
+        #if MICROPY_ENABLE_GC
+        // run collection and print GC info
+        gc_collect();
+        gc_dump_info();
+        #endif
+    }
+    #endif
+
+    if (exec_flags & EXEC_FLAG_PRINT_EOF) {
+        mp_hal_stdout_tx_strn("\x04", 1);
+    }
+
+    #ifdef MICROPY_BOARD_AFTER_PYTHON_EXEC
+    MICROPY_BOARD_AFTER_PYTHON_EXEC(input_kind, exec_flags, nlr.ret_val, &ret);
+    #endif
+
+    return ret;
+}
+
+#if MICROPY_ENABLE_COMPILER
+
+// This can be configured by a port (and even configured to a function to be
+// computed dynamically) to indicate the maximum number of bytes that can be
+// held in the stdin buffer.
+#ifndef MICROPY_REPL_STDIN_BUFFER_MAX
+#define MICROPY_REPL_STDIN_BUFFER_MAX (256)
+#endif
+
+typedef struct _mp_reader_stdin_t {
+    bool eof;
+    uint16_t window_max;
+    uint16_t window_remain;
+} mp_reader_stdin_t;
+
+STATIC mp_uint_t mp_reader_stdin_readbyte(void *data) {
+    mp_reader_stdin_t *reader = (mp_reader_stdin_t *)data;
+
+    if (reader->eof) {
+        return MP_READER_EOF;
+    }
+
+    int c = mp_hal_stdin_rx_chr();
+
+    if (c == CHAR_CTRL_C || c == CHAR_CTRL_D) {
+        reader->eof = true;
+        mp_hal_stdout_tx_strn("\x04", 1); // indicate end to host
+        if (c == CHAR_CTRL_C) {
+            #if MICROPY_KBD_EXCEPTION
+            MP_STATE_VM(mp_kbd_exception).traceback_data = NULL;
+            nlr_raise(MP_OBJ_FROM_PTR(&MP_STATE_VM(mp_kbd_exception)));
+            #else
+            mp_raise_type(&mp_type_KeyboardInterrupt);
+            #endif
+        } else {
+            return MP_READER_EOF;
+        }
+    }
+
+    if (--reader->window_remain == 0) {
+        mp_hal_stdout_tx_strn("\x01", 1); // indicate window available to host
+        reader->window_remain = reader->window_max;
+    }
+
+    return c;
+}
+
+STATIC void mp_reader_stdin_close(void *data) {
+    mp_reader_stdin_t *reader = (mp_reader_stdin_t *)data;
+    if (!reader->eof) {
+        reader->eof = true;
+        mp_hal_stdout_tx_strn("\x04", 1); // indicate end to host
+        for (;;) {
+            int c = mp_hal_stdin_rx_chr();
+            if (c == CHAR_CTRL_C || c == CHAR_CTRL_D) {
+                break;
+            }
+        }
+    }
+}
+
+STATIC void mp_reader_new_stdin(mp_reader_t *reader, mp_reader_stdin_t *reader_stdin, uint16_t buf_max) {
+    // Make flow-control window half the buffer size, and indicate to the host that 2x windows are
+    // free (sending the window size implicitly indicates that a window is free, and then the 0x01
+    // indicates that another window is free).
+    size_t window = buf_max / 2;
+    char reply[3] = { window & 0xff, window >> 8, 0x01 };
+    mp_hal_stdout_tx_strn(reply, sizeof(reply));
+
+    reader_stdin->eof = false;
+    reader_stdin->window_max = window;
+    reader_stdin->window_remain = window;
+    reader->data = reader_stdin;
+    reader->readbyte = mp_reader_stdin_readbyte;
+    reader->close = mp_reader_stdin_close;
+}
+
+STATIC int do_reader_stdin(int c) {
+    if (c != 'A') {
+        // Unsupported command.
+        mp_hal_stdout_tx_strn("R\x00", 2);
+        return 0;
+    }
+
+    // Indicate reception of command.
+    mp_hal_stdout_tx_strn("R\x01", 2);
+
+    mp_reader_t reader;
+    mp_reader_stdin_t reader_stdin;
+    mp_reader_new_stdin(&reader, &reader_stdin, MICROPY_REPL_STDIN_BUFFER_MAX);
+    int exec_flags = EXEC_FLAG_PRINT_EOF | EXEC_FLAG_SOURCE_IS_READER;
+    return parse_compile_execute(&reader, MP_PARSE_FILE_INPUT, exec_flags);
+}
+
+#if MICROPY_REPL_EVENT_DRIVEN
+
+typedef struct _repl_t {
+    // This structure originally also held current REPL line,
+    // but it was moved to MP_STATE_VM(repl_line) as containing
+    // root pointer. Still keep structure in case more state
+    // will be added later.
+    // vstr_t line;
+    bool cont_line;
+    bool paste_mode;
+} repl_t;
+
+repl_t repl;
+
+STATIC int pyexec_raw_repl_process_char(int c);
+STATIC int pyexec_friendly_repl_process_char(int c);
+
+void pyexec_event_repl_init(void) {
+    MP_STATE_VM(repl_line) = vstr_new(32);
+    repl.cont_line = false;
+    repl.paste_mode = false;
+    // no prompt before printing friendly REPL banner or entering raw REPL
+    readline_init(MP_STATE_VM(repl_line), "");
+    if (pyexec_mode_kind == PYEXEC_MODE_RAW_REPL) {
+        pyexec_raw_repl_process_char(CHAR_CTRL_A);
+    } else {
+        pyexec_friendly_repl_process_char(CHAR_CTRL_B);
+    }
+}
+
+STATIC int pyexec_raw_repl_process_char(int c) {
+    if (c == CHAR_CTRL_A) {
+        // reset raw REPL
+        if (vstr_len(MP_STATE_VM(repl_line)) == 2 && vstr_str(MP_STATE_VM(repl_line))[0] == CHAR_CTRL_E) {
+            int ret = do_reader_stdin(vstr_str(MP_STATE_VM(repl_line))[1]);
+            if (ret & PYEXEC_FORCED_EXIT) {
+                return ret;
+            }
+            goto reset;
+        }
+        mp_hal_stdout_tx_str("raw REPL; CTRL-B to exit\r\n");
+        goto reset;
+    } else if (c == CHAR_CTRL_B) {
+        // change to friendly REPL
+        pyexec_mode_kind = PYEXEC_MODE_FRIENDLY_REPL;
+        vstr_reset(MP_STATE_VM(repl_line));
+        repl.cont_line = false;
+        repl.paste_mode = false;
+        pyexec_friendly_repl_process_char(CHAR_CTRL_B);
+        return 0;
+    } else if (c == CHAR_CTRL_C) {
+        // clear line
+        vstr_reset(MP_STATE_VM(repl_line));
+        return 0;
+    } else if (c == CHAR_CTRL_D) {
+        // input finished
+    } else {
+        // let through any other raw 8-bit value
+        vstr_add_byte(MP_STATE_VM(repl_line), c);
+        return 0;
+    }
+
+    // indicate reception of command
+    mp_hal_stdout_tx_str("OK");
+
+    if (MP_STATE_VM(repl_line)->len == 0) {
+        // exit for a soft reset
+        mp_hal_stdout_tx_str("\r\n");
+        vstr_clear(MP_STATE_VM(repl_line));
+        return PYEXEC_FORCED_EXIT;
+    }
+
+    int ret = parse_compile_execute(MP_STATE_VM(repl_line), MP_PARSE_FILE_INPUT, EXEC_FLAG_PRINT_EOF | EXEC_FLAG_SOURCE_IS_VSTR);
+    if (ret & PYEXEC_FORCED_EXIT) {
+        return ret;
+    }
+
+reset:
+    vstr_reset(MP_STATE_VM(repl_line));
+    mp_hal_stdout_tx_str(">");
+
+    return 0;
+}
+
+STATIC int pyexec_friendly_repl_process_char(int c) {
+    if (repl.paste_mode) {
+        if (c == CHAR_CTRL_C) {
+            // cancel everything
+            mp_hal_stdout_tx_str("\r\n");
+            goto input_restart;
+        } else if (c == CHAR_CTRL_D) {
+            // end of input
+            mp_hal_stdout_tx_str("\r\n");
+            int ret = parse_compile_execute(MP_STATE_VM(repl_line), MP_PARSE_FILE_INPUT, EXEC_FLAG_ALLOW_DEBUGGING | EXEC_FLAG_IS_REPL | EXEC_FLAG_SOURCE_IS_VSTR);
+            if (ret & PYEXEC_FORCED_EXIT) {
+                return ret;
+            }
+            goto input_restart;
+        } else {
+            // add char to buffer and echo
+            vstr_add_byte(MP_STATE_VM(repl_line), c);
+            if (c == '\r') {
+                mp_hal_stdout_tx_str("\r\n=== ");
+            } else {
+                char buf[1] = {c};
+                mp_hal_stdout_tx_strn(buf, 1);
+            }
+            return 0;
+        }
+    }
+
+    int ret = readline_process_char(c);
+
+    if (!repl.cont_line) {
+
+        if (ret == CHAR_CTRL_A) {
+            // change to raw REPL
+            pyexec_mode_kind = PYEXEC_MODE_RAW_REPL;
+            mp_hal_stdout_tx_str("\r\n");
+            pyexec_raw_repl_process_char(CHAR_CTRL_A);
+            return 0;
+        } else if (ret == CHAR_CTRL_B) {
+            // reset friendly REPL
+            mp_hal_stdout_tx_str("\r\n");
+            mp_hal_stdout_tx_str("\e[01;31m✿ Poppy\e[0m REPL on " MICROPY_HW_BOARD_NAME " with \e[01;36m" MICROPY_HW_MCU_NAME "\e[0m\r\n");
+            mp_hal_stdout_tx_str(MICROPY_GIT_TAG " built " MICROPY_BUILD_DATE "\r\n");
+            #if MICROPY_PY_BUILTINS_HELP
+            mp_hal_stdout_tx_str("Type \"help()\" for more information.\r\n");
+            #endif
+            goto input_restart;
+        } else if (ret == CHAR_CTRL_C) {
+            // break
+            mp_hal_stdout_tx_str("\r\n");
+            goto input_restart;
+        } else if (ret == CHAR_CTRL_D) {
+            // exit for a soft reset
+            mp_hal_stdout_tx_str("\r\n");
+            vstr_clear(MP_STATE_VM(repl_line));
+            return PYEXEC_FORCED_EXIT;
+        } else if (ret == CHAR_CTRL_E) {
+            // paste mode
+            mp_hal_stdout_tx_str("\r\npaste mode; Ctrl-C to cancel, Ctrl-D to finish\r\n=== ");
+            vstr_reset(MP_STATE_VM(repl_line));
+            repl.paste_mode = true;
+            return 0;
+        }
+
+        if (ret < 0) {
+            return 0;
+        }
+
+        if (!mp_repl_continue_with_input(vstr_null_terminated_str(MP_STATE_VM(repl_line)))) {
+            goto exec;
+        }
+
+        vstr_add_byte(MP_STATE_VM(repl_line), '\n');
+        repl.cont_line = true;
+        readline_note_newline(mp_repl_get_ps2());
+        return 0;
+
+    } else {
+
+        if (ret == CHAR_CTRL_C) {
+            // cancel everything
+            mp_hal_stdout_tx_str("\r\n");
+            repl.cont_line = false;
+            goto input_restart;
+        } else if (ret == CHAR_CTRL_D) {
+            // stop entering compound statement
+            goto exec;
+        }
+
+        if (ret < 0) {
+            return 0;
+        }
+
+        if (mp_repl_continue_with_input(vstr_null_terminated_str(MP_STATE_VM(repl_line)))) {
+            vstr_add_byte(MP_STATE_VM(repl_line), '\n');
+            readline_note_newline(mp_repl_get_ps2());
+            return 0;
+        }
+
+    exec:;
+        int ret = parse_compile_execute(MP_STATE_VM(repl_line), MP_PARSE_SINGLE_INPUT, EXEC_FLAG_ALLOW_DEBUGGING | EXEC_FLAG_IS_REPL | EXEC_FLAG_SOURCE_IS_VSTR);
+        if (ret & PYEXEC_FORCED_EXIT) {
+            return ret;
+        }
+
+    input_restart:
+        vstr_reset(MP_STATE_VM(repl_line));
+        repl.cont_line = false;
+        repl.paste_mode = false;
+        readline_init(MP_STATE_VM(repl_line), mp_repl_get_ps1());
+        return 0;
+    }
+}
+
+uint8_t pyexec_repl_active;
+int pyexec_event_repl_process_char(int c) {
+    pyexec_repl_active = 1;
+    int res;
+    if (pyexec_mode_kind == PYEXEC_MODE_RAW_REPL) {
+        res = pyexec_raw_repl_process_char(c);
+    } else {
+        res = pyexec_friendly_repl_process_char(c);
+    }
+    pyexec_repl_active = 0;
+    return res;
+}
+
+#else // MICROPY_REPL_EVENT_DRIVEN
+
+int pyexec_raw_repl(void) {
+    vstr_t line;
+    vstr_init(&line, 32);
+
+raw_repl_reset:
+    mp_hal_stdout_tx_str("raw REPL; CTRL-B to exit\r\n");
+
+    for (;;) {
+        vstr_reset(&line);
+        mp_hal_stdout_tx_str(">");
+        for (;;) {
+            int c = mp_hal_stdin_rx_chr();
+            if (c == CHAR_CTRL_A) {
+                // reset raw REPL
+                if (vstr_len(&line) == 2 && vstr_str(&line)[0] == CHAR_CTRL_E) {
+                    int ret = do_reader_stdin(vstr_str(&line)[1]);
+                    if (ret & PYEXEC_FORCED_EXIT) {
+                        return ret;
+                    }
+                    vstr_reset(&line);
+                    mp_hal_stdout_tx_str(">");
+                    continue;
+                }
+                goto raw_repl_reset;
+            } else if (c == CHAR_CTRL_B) {
+                // change to friendly REPL
+                mp_hal_stdout_tx_str("\r\n");
+                vstr_clear(&line);
+                pyexec_mode_kind = PYEXEC_MODE_FRIENDLY_REPL;
+                return 0;
+            } else if (c == CHAR_CTRL_C) {
+                // clear line
+                vstr_reset(&line);
+            } else if (c == CHAR_CTRL_D) {
+                // input finished
+                break;
+            } else {
+                // let through any other raw 8-bit value
+                vstr_add_byte(&line, c);
+            }
+        }
+
+        // indicate reception of command
+        mp_hal_stdout_tx_str("OK");
+
+        if (line.len == 0) {
+            // exit for a soft reset
+            mp_hal_stdout_tx_str("\r\n");
+            vstr_clear(&line);
+            return PYEXEC_FORCED_EXIT;
+        }
+
+        int ret = parse_compile_execute(&line, MP_PARSE_FILE_INPUT, EXEC_FLAG_PRINT_EOF | EXEC_FLAG_SOURCE_IS_VSTR);
+        if (ret & PYEXEC_FORCED_EXIT) {
+            return ret;
+        }
+    }
+}
+
+int pyexec_friendly_repl(void) {
+    vstr_t line;
+    vstr_init(&line, 32);
+
+friendly_repl_reset:
+    mp_hal_stdout_tx_str("MicroPython " MICROPY_GIT_TAG " on " MICROPY_BUILD_DATE "; " MICROPY_HW_BOARD_NAME " with " MICROPY_HW_MCU_NAME "\r\n");
+    #if MICROPY_PY_BUILTINS_HELP
+    mp_hal_stdout_tx_str("Type \"help()\" for more information.\r\n");
+    #endif
+
+    // to test ctrl-C
+    /*
+    {
+        uint32_t x[4] = {0x424242, 0xdeaddead, 0x242424, 0xdeadbeef};
+        for (;;) {
+            nlr_buf_t nlr;
+            printf("pyexec_repl: %p\n", x);
+            mp_hal_set_interrupt_char(CHAR_CTRL_C);
+            if (nlr_push(&nlr) == 0) {
+                for (;;) {
+                }
+            } else {
+                printf("break\n");
+            }
+        }
+    }
+    */
+
+    for (;;) {
+    input_restart:
+
+        #if MICROPY_HW_ENABLE_USB
+        if (usb_vcp_is_enabled()) {
+            // If the user gets to here and interrupts are disabled then
+            // they'll never see the prompt, traceback etc. The USB REPL needs
+            // interrupts to be enabled or no transfers occur. So we try to
+            // do the user a favor and reenable interrupts.
+            if (query_irq() == IRQ_STATE_DISABLED) {
+                enable_irq(IRQ_STATE_ENABLED);
+                mp_hal_stdout_tx_str("MPY: enabling IRQs\r\n");
+            }
+        }
+        #endif
+
+        // If the GC is locked at this point there is no way out except a reset,
+        // so force the GC to be unlocked to help the user debug what went wrong.
+        if (MP_STATE_THREAD(gc_lock_depth) != 0) {
+            MP_STATE_THREAD(gc_lock_depth) = 0;
+        }
+
+        vstr_reset(&line);
+        int ret = readline(&line, mp_repl_get_ps1());
+        mp_parse_input_kind_t parse_input_kind = MP_PARSE_SINGLE_INPUT;
+
+        if (ret == CHAR_CTRL_A) {
+            // change to raw REPL
+            mp_hal_stdout_tx_str("\r\n");
+            vstr_clear(&line);
+            pyexec_mode_kind = PYEXEC_MODE_RAW_REPL;
+            return 0;
+        } else if (ret == CHAR_CTRL_B) {
+            // reset friendly REPL
+            mp_hal_stdout_tx_str("\r\n");
+            goto friendly_repl_reset;
+        } else if (ret == CHAR_CTRL_C) {
+            // break
+            mp_hal_stdout_tx_str("\r\n");
+            continue;
+        } else if (ret == CHAR_CTRL_D) {
+            // exit for a soft reset
+            mp_hal_stdout_tx_str("\r\n");
+            vstr_clear(&line);
+            return PYEXEC_FORCED_EXIT;
+        } else if (ret == CHAR_CTRL_E) {
+            // paste mode
+            mp_hal_stdout_tx_str("\r\npaste mode; Ctrl-C to cancel, Ctrl-D to finish\r\n=== ");
+            vstr_reset(&line);
+            for (;;) {
+                char c = mp_hal_stdin_rx_chr();
+                if (c == CHAR_CTRL_C) {
+                    // cancel everything
+                    mp_hal_stdout_tx_str("\r\n");
+                    goto input_restart;
+                } else if (c == CHAR_CTRL_D) {
+                    // end of input
+                    mp_hal_stdout_tx_str("\r\n");
+                    break;
+                } else {
+                    // add char to buffer and echo
+                    vstr_add_byte(&line, c);
+                    if (c == '\r') {
+                        mp_hal_stdout_tx_str("\r\n=== ");
+                    } else {
+                        mp_hal_stdout_tx_strn(&c, 1);
+                    }
+                }
+            }
+            parse_input_kind = MP_PARSE_FILE_INPUT;
+        } else if (vstr_len(&line) == 0) {
+            continue;
+        } else {
+            // got a line with non-zero length, see if it needs continuing
+            while (mp_repl_continue_with_input(vstr_null_terminated_str(&line))) {
+                vstr_add_byte(&line, '\n');
+                ret = readline(&line, mp_repl_get_ps2());
+                if (ret == CHAR_CTRL_C) {
+                    // cancel everything
+                    mp_hal_stdout_tx_str("\r\n");
+                    goto input_restart;
+                } else if (ret == CHAR_CTRL_D) {
+                    // stop entering compound statement
+                    break;
+                }
+            }
+        }
+
+        ret = parse_compile_execute(&line, parse_input_kind, EXEC_FLAG_ALLOW_DEBUGGING | EXEC_FLAG_IS_REPL | EXEC_FLAG_SOURCE_IS_VSTR);
+        if (ret & PYEXEC_FORCED_EXIT) {
+            return ret;
+        }
+    }
+}
+
+#endif // MICROPY_REPL_EVENT_DRIVEN
+#endif // MICROPY_ENABLE_COMPILER
+
+int pyexec_file(const char *filename) {
+    return parse_compile_execute(filename, MP_PARSE_FILE_INPUT, EXEC_FLAG_SOURCE_IS_FILENAME);
+}
+
+int pyexec_file_if_exists(const char *filename) {
+    #if MICROPY_MODULE_FROZEN
+    if (mp_find_frozen_module(filename, NULL, NULL) == MP_IMPORT_STAT_FILE) {
+        return pyexec_frozen_module(filename);
+    }
+    #endif
+    if (mp_import_stat(filename) != MP_IMPORT_STAT_FILE) {
+        return 1; // success (no file is the same as an empty file executing without fail)
+    }
+    return pyexec_file(filename);
+}
+
+#if MICROPY_MODULE_FROZEN
+int pyexec_frozen_module(const char *name) {
+    void *frozen_data;
+    int frozen_type;
+    mp_find_frozen_module(name, &frozen_type, &frozen_data);
+
+    switch (frozen_type) {
+        #if MICROPY_MODULE_FROZEN_STR
+        case MP_FROZEN_STR:
+            return parse_compile_execute(frozen_data, MP_PARSE_FILE_INPUT, 0);
+        #endif
+
+        #if MICROPY_MODULE_FROZEN_MPY
+        case MP_FROZEN_MPY:
+            return parse_compile_execute(frozen_data, MP_PARSE_FILE_INPUT, EXEC_FLAG_SOURCE_IS_RAW_CODE);
+        #endif
+
+        default:
+            printf("could not find module '%s'\n", name);
+            return false;
+    }
+}
+#endif
+
+#if MICROPY_REPL_INFO
+mp_obj_t pyb_set_repl_info(mp_obj_t o_value) {
+    repl_display_debugging_info = mp_obj_get_int(o_value);
+    return mp_const_none;
+}
+MP_DEFINE_CONST_FUN_OBJ_1(pyb_set_repl_info_obj, pyb_set_repl_info);
+#endif
+
+// -------------- shared/readline/readline.c --------------------- //
+
+#include <stdint.h>
+#include <string.h>
+
+#include "py/mpstate.h"
+#include "py/repl.h"
+#include "py/mphal.h"
+#include "shared/readline/readline.h"
+
+#if 0 // print debugging info
+#define DEBUG_PRINT (1)
+#define DEBUG_printf printf
+#else // don't print debugging info
+#define DEBUG_printf(...) (void)0
+#endif
+
+#define READLINE_HIST_SIZE (MP_ARRAY_SIZE(MP_STATE_PORT(readline_hist)))
+
+enum { ESEQ_NONE, ESEQ_ESC, ESEQ_ESC_BRACKET, ESEQ_ESC_BRACKET_DIGIT, ESEQ_ESC_O };
+
+void readline_init0(void) {
+    memset(MP_STATE_PORT(readline_hist), 0, READLINE_HIST_SIZE * sizeof(const char*));
+}
+
+STATIC char *str_dup_maybe(const char *str) {
+    uint32_t len = strlen(str);
+    char *s2 = m_new_maybe(char, len + 1);
+    if (s2 == NULL) {
+        return NULL;
+    }
+    memcpy(s2, str, len + 1);
+    return s2;
+}
+
+// By default assume terminal which implements VT100 commands...
+#ifndef MICROPY_HAL_HAS_VT100
+#define MICROPY_HAL_HAS_VT100 (1)
+#endif
+
+// ...and provide the implementation using them
+#if MICROPY_HAL_HAS_VT100
+STATIC void mp_hal_move_cursor_back(uint pos) {
+    if (pos <= 4) {
+        // fast path for most common case of 1 step back
+        mp_hal_stdout_tx_strn("\b\b\b\b", pos);
+    } else {
+        // char vt100_command[6];
+        // snprintf needs space for the terminating null character
+        // int n = snprintf(&vt100_command[0], sizeof(vt100_command), "\x1b[%u", pos);
+        char vt100_command[46] = "\nmp_hal_move_cursor_back not implemented :)\n";
+        int n = 45;
+        if (n > 0) {
+            assert((unsigned)n < sizeof(vt100_command));
+            vt100_command[n] = 'D'; // replace null char
+            mp_hal_stdout_tx_strn(vt100_command, n + 1);
+        }
+    }
+}
+
+STATIC void mp_hal_erase_line_from_cursor(uint n_chars_to_erase) {
+    (void)n_chars_to_erase;
+    mp_hal_stdout_tx_strn("\x1b[K", 3);
+}
+#endif
+
+typedef struct _readline_t {
+    vstr_t *line;
+    size_t orig_line_len;
+    int escape_seq;
+    int hist_cur;
+    size_t cursor_pos;
+    char escape_seq_buf[1];
+    const char *prompt;
+} readline_t;
+
+STATIC readline_t rl;
+
+#if MICROPY_REPL_EMACS_WORDS_MOVE
+STATIC size_t cursor_count_word(int forward) {
+    const char *line_buf = vstr_str(rl.line);
+    size_t pos = rl.cursor_pos;
+    bool in_word = false;
+
+    for (;;) {
+        // if moving backwards and we've reached 0... break
+        if (!forward && pos == 0) {
+            break;
+        }
+        // or if moving forwards and we've reached to the end of line... break
+        else if (forward && pos == vstr_len(rl.line)) {
+            break;
+        }
+
+        if (unichar_isalnum(line_buf[pos + (forward - 1)])) {
+            in_word = true;
+        } else if (in_word) {
+            break;
+        }
+
+        pos += forward ? forward : -1;
+    }
+
+    return forward ? pos - rl.cursor_pos : rl.cursor_pos - pos;
+}
+#endif
+
+int readline_process_char(int c) {
+    size_t last_line_len = rl.line->len;
+    int redraw_step_back = 0;
+    bool redraw_from_cursor = false;
+    int redraw_step_forward = 0;
+    if (rl.escape_seq == ESEQ_NONE) {
+        if (CHAR_CTRL_A <= c && c <= CHAR_CTRL_E && vstr_len(rl.line) == rl.orig_line_len) {
+            // control character with empty line
+            return c;
+        } else if (c == CHAR_CTRL_A) {
+            // CTRL-A with non-empty line is go-to-start-of-line
+            goto home_key;
+        #if MICROPY_REPL_EMACS_KEYS
+        } else if (c == CHAR_CTRL_B) {
+            // CTRL-B with non-empty line is go-back-one-char
+            goto left_arrow_key;
+        #endif
+        } else if (c == CHAR_CTRL_C) {
+            // CTRL-C with non-empty line is cancel
+            return c;
+        #if MICROPY_REPL_EMACS_KEYS
+        } else if (c == CHAR_CTRL_D) {
+            // CTRL-D with non-empty line is delete-at-cursor
+            goto delete_key;
+        #endif
+        } else if (c == CHAR_CTRL_E) {
+            // CTRL-E is go-to-end-of-line
+            goto end_key;
+        #if MICROPY_REPL_EMACS_KEYS
+        } else if (c == CHAR_CTRL_F) {
+            // CTRL-F with non-empty line is go-forward-one-char
+            goto right_arrow_key;
+        } else if (c == CHAR_CTRL_K) {
+            // CTRL-K is kill from cursor to end-of-line, inclusive
+            vstr_cut_tail_bytes(rl.line, last_line_len - rl.cursor_pos);
+            // set redraw parameters
+            redraw_from_cursor = true;
+        } else if (c == CHAR_CTRL_N) {
+            // CTRL-N is go to next line in history
+            goto down_arrow_key;
+        } else if (c == CHAR_CTRL_P) {
+            // CTRL-P is go to previous line in history
+            goto up_arrow_key;
+        } else if (c == CHAR_CTRL_U) {
+            // CTRL-U is kill from beginning-of-line up to cursor
+            vstr_cut_out_bytes(rl.line, rl.orig_line_len, rl.cursor_pos - rl.orig_line_len);
+            // set redraw parameters
+            redraw_step_back = rl.cursor_pos - rl.orig_line_len;
+            redraw_from_cursor = true;
+        #endif
+        #if MICROPY_REPL_EMACS_EXTRA_WORDS_MOVE
+        } else if (c == CHAR_CTRL_W) {
+            goto backward_kill_word;
+        #endif
+        } else if (c == '\r') {
+            // newline
+            mp_hal_stdout_tx_str("\r\n");
+            readline_push_history(vstr_null_terminated_str(rl.line) + rl.orig_line_len);
+            return 0;
+        } else if (c == 27) {
+            // escape sequence
+            rl.escape_seq = ESEQ_ESC;
+        } else if (c == 8 || c == 127) {
+            // backspace/delete
+            if (rl.cursor_pos > rl.orig_line_len) {
+                // work out how many chars to backspace
+                #if MICROPY_REPL_AUTO_INDENT
+                int nspace = 0;
+                for (size_t i = rl.orig_line_len; i < rl.cursor_pos; i++) {
+                    if (rl.line->buf[i] != ' ') {
+                        nspace = 0;
+                        break;
+                    }
+                    nspace += 1;
+                }
+                if (nspace < 4) {
+                    nspace = 1;
+                } else {
+                    nspace = 4;
+                }
+                #else
+                int nspace = 1;
+                #endif
+
+                // do the backspace
+                vstr_cut_out_bytes(rl.line, rl.cursor_pos - nspace, nspace);
+                // set redraw parameters
+                redraw_step_back = nspace;
+                redraw_from_cursor = true;
+            }
+        #if MICROPY_HELPER_REPL
+        } else if (c == 9) {
+            // tab magic
+            const char *compl_str;
+            size_t compl_len = mp_repl_autocomplete(rl.line->buf + rl.orig_line_len, rl.cursor_pos - rl.orig_line_len, &mp_plat_print, &compl_str);
+            if (compl_len == 0) {
+                // no match
+            } else if (compl_len == (size_t)(-1)) {
+                // many matches
+                mp_hal_stdout_tx_str(rl.prompt);
+                mp_hal_stdout_tx_strn(rl.line->buf + rl.orig_line_len, rl.cursor_pos - rl.orig_line_len);
+                redraw_from_cursor = true;
+            } else {
+                // one match
+                for (size_t i = 0; i < compl_len; ++i) {
+                    vstr_ins_byte(rl.line, rl.cursor_pos + i, *compl_str++);
+                }
+                // set redraw parameters
+                redraw_from_cursor = true;
+                redraw_step_forward = compl_len;
+            }
+        #endif
+        } else if (32 <= c && c <= 126) {
+            // printable character
+            vstr_ins_char(rl.line, rl.cursor_pos, c);
+            // set redraw parameters
+            redraw_from_cursor = true;
+            redraw_step_forward = 1;
+        }
+    } else if (rl.escape_seq == ESEQ_ESC) {
+        switch (c) {
+            case '[':
+                rl.escape_seq = ESEQ_ESC_BRACKET;
+                break;
+            case 'O':
+                rl.escape_seq = ESEQ_ESC_O;
+                break;
+            #if MICROPY_REPL_EMACS_WORDS_MOVE
+            case 'b':
+#if MICROPY_REPL_EMACS_EXTRA_WORDS_MOVE
+backward_word:
+#endif
+                redraw_step_back = cursor_count_word(0);
+                rl.escape_seq = ESEQ_NONE;
+                break;
+            case 'f':
+#if MICROPY_REPL_EMACS_EXTRA_WORDS_MOVE
+forward_word:
+#endif
+                redraw_step_forward = cursor_count_word(1);
+                rl.escape_seq = ESEQ_NONE;
+                break;
+            case 'd':
+                vstr_cut_out_bytes(rl.line, rl.cursor_pos, cursor_count_word(1));
+                redraw_from_cursor = true;
+                rl.escape_seq = ESEQ_NONE;
+                break;
+            case 127:
+#if MICROPY_REPL_EMACS_EXTRA_WORDS_MOVE
+backward_kill_word:
+#endif
+                redraw_step_back = cursor_count_word(0);
+                vstr_cut_out_bytes(rl.line, rl.cursor_pos - redraw_step_back, redraw_step_back);
+                redraw_from_cursor = true;
+                rl.escape_seq = ESEQ_NONE;
+                break;
+            #endif
+            default:
+                DEBUG_printf("(ESC %d)", c);
+                rl.escape_seq = ESEQ_NONE;
+                break;
+        }
+    } else if (rl.escape_seq == ESEQ_ESC_BRACKET) {
+        if ('0' <= c && c <= '9') {
+            rl.escape_seq = ESEQ_ESC_BRACKET_DIGIT;
+            rl.escape_seq_buf[0] = c;
+        } else {
+            rl.escape_seq = ESEQ_NONE;
+            if (c == 'A') {
+#if MICROPY_REPL_EMACS_KEYS
+up_arrow_key:
+#endif
+                // up arrow
+                if (rl.hist_cur + 1 < (int)READLINE_HIST_SIZE && MP_STATE_PORT(readline_hist)[rl.hist_cur + 1] != NULL) {
+                    // increase hist num
+                    rl.hist_cur += 1;
+                    // set line to history
+                    rl.line->len = rl.orig_line_len;
+                    vstr_add_str(rl.line, MP_STATE_PORT(readline_hist)[rl.hist_cur]);
+                    // set redraw parameters
+                    redraw_step_back = rl.cursor_pos - rl.orig_line_len;
+                    redraw_from_cursor = true;
+                    redraw_step_forward = rl.line->len - rl.orig_line_len;
+                }
+            } else if (c == 'B') {
+#if MICROPY_REPL_EMACS_KEYS
+down_arrow_key:
+#endif
+                // down arrow
+                if (rl.hist_cur >= 0) {
+                    // decrease hist num
+                    rl.hist_cur -= 1;
+                    // set line to history
+                    vstr_cut_tail_bytes(rl.line, rl.line->len - rl.orig_line_len);
+                    if (rl.hist_cur >= 0) {
+                        vstr_add_str(rl.line, MP_STATE_PORT(readline_hist)[rl.hist_cur]);
+                    }
+                    // set redraw parameters
+                    redraw_step_back = rl.cursor_pos - rl.orig_line_len;
+                    redraw_from_cursor = true;
+                    redraw_step_forward = rl.line->len - rl.orig_line_len;
+                }
+            } else if (c == 'C') {
+#if MICROPY_REPL_EMACS_KEYS
+right_arrow_key:
+#endif
+                // right arrow
+                if (rl.cursor_pos < rl.line->len) {
+                    redraw_step_forward = 1;
+                }
+            } else if (c == 'D') {
+#if MICROPY_REPL_EMACS_KEYS
+left_arrow_key:
+#endif
+                // left arrow
+                if (rl.cursor_pos > rl.orig_line_len) {
+                    redraw_step_back = 1;
+                }
+            } else if (c == 'H') {
+                // home
+                goto home_key;
+            } else if (c == 'F') {
+                // end
+                goto end_key;
+            } else {
+                DEBUG_printf("(ESC [ %d)", c);
+            }
+        }
+    } else if (rl.escape_seq == ESEQ_ESC_BRACKET_DIGIT) {
+        if (c == '~') {
+            if (rl.escape_seq_buf[0] == '1' || rl.escape_seq_buf[0] == '7') {
+home_key:
+                redraw_step_back = rl.cursor_pos - rl.orig_line_len;
+            } else if (rl.escape_seq_buf[0] == '4' || rl.escape_seq_buf[0] == '8') {
+end_key:
+                redraw_step_forward = rl.line->len - rl.cursor_pos;
+            } else if (rl.escape_seq_buf[0] == '3') {
+                // delete
+#if MICROPY_REPL_EMACS_KEYS
+delete_key:
+#endif
+                if (rl.cursor_pos < rl.line->len) {
+                    vstr_cut_out_bytes(rl.line, rl.cursor_pos, 1);
+                    redraw_from_cursor = true;
+                }
+            } else {
+                DEBUG_printf("(ESC [ %c %d)", rl.escape_seq_buf[0], c);
+            }
+        #if MICROPY_REPL_EMACS_EXTRA_WORDS_MOVE
+        } else if (c == ';' && rl.escape_seq_buf[0] == '1') {
+            // ';' is used to separate parameters. so first parameter was '1',
+            // that's used for sequences like ctrl+left, which we will try to parse.
+            // escape_seq state is reset back to ESEQ_ESC_BRACKET, as if we've just received
+            // the opening bracket, because more parameters are to come.
+            // we don't track the parameters themselves to keep low on logic and code size. that
+            // might be required in the future if more complex sequences are added.
+            rl.escape_seq = ESEQ_ESC_BRACKET;
+            // goto away from the state-machine, as rl.escape_seq will be overridden.
+            goto redraw;
+        } else if (rl.escape_seq_buf[0] == '5' && c == 'C') {
+            // ctrl+right
+            goto forward_word;
+        } else if (rl.escape_seq_buf[0] == '5' && c == 'D') {
+            // ctrl+left
+            goto backward_word;
+        #endif
+        } else {
+            DEBUG_printf("(ESC [ %c %d)", rl.escape_seq_buf[0], c);
+        }
+        rl.escape_seq = ESEQ_NONE;
+    } else if (rl.escape_seq == ESEQ_ESC_O) {
+        switch (c) {
+            case 'H':
+                goto home_key;
+            case 'F':
+                goto end_key;
+            default:
+                DEBUG_printf("(ESC O %d)", c);
+                rl.escape_seq = ESEQ_NONE;
+        }
+    } else {
+        rl.escape_seq = ESEQ_NONE;
+    }
+
+#if MICROPY_REPL_EMACS_EXTRA_WORDS_MOVE
+redraw:
+#endif
+
+    // redraw command prompt, efficiently
+    if (redraw_step_back > 0) {
+        mp_hal_move_cursor_back(redraw_step_back);
+        rl.cursor_pos -= redraw_step_back;
+    }
+    if (redraw_from_cursor) {
+        if (rl.line->len < last_line_len) {
+            // erase old chars
+            mp_hal_erase_line_from_cursor(last_line_len - rl.cursor_pos);
+        }
+        // draw new chars
+        mp_hal_stdout_tx_strn(rl.line->buf + rl.cursor_pos, rl.line->len - rl.cursor_pos);
+        // move cursor forward if needed (already moved forward by length of line, so move it back)
+        mp_hal_move_cursor_back(rl.line->len - (rl.cursor_pos + redraw_step_forward));
+        rl.cursor_pos += redraw_step_forward;
+    } else if (redraw_step_forward > 0) {
+        // draw over old chars to move cursor forwards
+        mp_hal_stdout_tx_strn(rl.line->buf + rl.cursor_pos, redraw_step_forward);
+        rl.cursor_pos += redraw_step_forward;
+    }
+
+    return -1;
+}
+
+#if MICROPY_REPL_AUTO_INDENT
+STATIC void readline_auto_indent(void) {
+    vstr_t *line = rl.line;
+    if (line->len > 1 && line->buf[line->len - 1] == '\n') {
+        int i;
+        for (i = line->len - 1; i > 0; i--) {
+            if (line->buf[i - 1] == '\n') {
+                break;
+            }
+        }
+        size_t j;
+        for (j = i; j < line->len; j++) {
+            if (line->buf[j] != ' ') {
+                break;
+            }
+        }
+        // i=start of line; j=first non-space
+        if (i > 0 && j + 1 == line->len) {
+            // previous line is not first line and is all spaces
+            for (size_t k = i - 1; k > 0; --k) {
+                if (line->buf[k - 1] == '\n') {
+                    // don't auto-indent if last 2 lines are all spaces
+                    return;
+                } else if (line->buf[k - 1] != ' ') {
+                    // 2nd previous line is not all spaces
+                    break;
+                }
+            }
+        }
+        int n = (j - i) / 4;
+        if (line->buf[line->len - 2] == ':') {
+            n += 1;
+        }
+        while (n-- > 0) {
+            vstr_add_strn(line, "    ", 4);
+            mp_hal_stdout_tx_strn("    ", 4);
+            rl.cursor_pos += 4;
+        }
+    }
+}
+#endif
+
+void readline_note_newline(const char *prompt) {
+    rl.orig_line_len = rl.line->len;
+    rl.cursor_pos = rl.orig_line_len;
+    rl.prompt = prompt;
+    mp_hal_stdout_tx_str(prompt);
+    #if MICROPY_REPL_AUTO_INDENT
+    readline_auto_indent();
+    #endif
+}
+
+void readline_init(vstr_t *line, const char *prompt) {
+    rl.line = line;
+    rl.orig_line_len = line->len;
+    rl.escape_seq = ESEQ_NONE;
+    rl.escape_seq_buf[0] = 0;
+    rl.hist_cur = -1;
+    rl.cursor_pos = rl.orig_line_len;
+    rl.prompt = prompt;
+    mp_hal_stdout_tx_str(prompt);
+    #if MICROPY_REPL_AUTO_INDENT
+    readline_auto_indent();
+    #endif
+}
+
+int readline(vstr_t *line, const char *prompt) {
+    readline_init(line, prompt);
+    for (;;) {
+        int c = mp_hal_stdin_rx_chr();
+        int r = readline_process_char(c);
+        if (r >= 0) {
+            return r;
+        }
+    }
+}
+
+void readline_push_history(const char *line) {
+    if (line[0] != '\0'
+        && (MP_STATE_PORT(readline_hist)[0] == NULL
+            || strcmp(MP_STATE_PORT(readline_hist)[0], line) != 0)) {
+        // a line which is not empty and different from the last one
+        // so update the history
+        char *most_recent_hist = str_dup_maybe(line);
+        if (most_recent_hist != NULL) {
+            for (int i = READLINE_HIST_SIZE - 1; i > 0; i--) {
+                MP_STATE_PORT(readline_hist)[i] = MP_STATE_PORT(readline_hist)[i - 1];
+            }
+            MP_STATE_PORT(readline_hist)[0] = most_recent_hist;
+        }
+    }
+}
+
+// ---------------- extmod/vfs_reader.c ---------------- //
+
+#if MICROPY_READER_VFS
+
+typedef struct _mp_reader_vfs_t {
+    mp_obj_t file;
+    uint16_t len;
+    uint16_t pos;
+    byte buf[24];
+} mp_reader_vfs_t;
+
+STATIC mp_uint_t mp_reader_vfs_readbyte(void *data) {
+    mp_reader_vfs_t *reader = (mp_reader_vfs_t *)data;
+    if (reader->pos >= reader->len) {
+        if (reader->len < sizeof(reader->buf)) {
+            return MP_READER_EOF;
+        } else {
+            int errcode;
+            reader->len = mp_stream_rw(reader->file, reader->buf, sizeof(reader->buf),
+                &errcode, MP_STREAM_RW_READ | MP_STREAM_RW_ONCE);
+            if (errcode != 0) {
+                // TODO handle errors properly
+                return MP_READER_EOF;
+            }
+            if (reader->len == 0) {
+                return MP_READER_EOF;
+            }
+            reader->pos = 0;
+        }
+    }
+    return reader->buf[reader->pos++];
+}
+
+STATIC void mp_reader_vfs_close(void *data) {
+    mp_reader_vfs_t *reader = (mp_reader_vfs_t *)data;
+    mp_stream_close(reader->file);
+    m_del_obj(mp_reader_vfs_t, reader);
+}
+
+void mp_reader_new_file(mp_reader_t *reader, const char *filename) {
+    mp_reader_vfs_t *rf = m_new_obj(mp_reader_vfs_t);
+    mp_obj_t args[2] = {
+        mp_obj_new_str(filename, strlen(filename)),
+        MP_OBJ_NEW_QSTR(MP_QSTR_rb),
+    };
+    rf->file = mp_vfs_open(MP_ARRAY_SIZE(args), &args[0], (mp_map_t *)&mp_const_empty_map);
+    int errcode;
+    rf->len = mp_stream_rw(rf->file, rf->buf, sizeof(rf->buf), &errcode, MP_STREAM_RW_READ | MP_STREAM_RW_ONCE);
+    if (errcode != 0) {
+        mp_raise_OSError(errcode);
+    }
+    rf->pos = 0;
+    reader->data = rf;
+    reader->readbyte = mp_reader_vfs_readbyte;
+    reader->close = mp_reader_vfs_close;
+}
+
+#endif // MICROPY_READER_VFS
+
+
+// -------- GC goes last because nasty #define free... -------- //
+
 #ifndef __IPU__
 #include  <stdio.h>
 #endif
@@ -41011,9 +48658,9 @@ size_t m_get_peak_bytes_allocated(void) {
 }
 #endif
 
-// ------------------------------------------ EXT modules --------------------------------------------- //
 
-// None
+
+
 
 // ----------------------------- "poppy" IPU port (here because I'm bad at linking) ------------------- //
 
@@ -41037,10 +48684,10 @@ void nlr_jump_fail(void *val) {
     __builtin_unreachable();
 }
 
-mp_obj_t mp_builtin_open(size_t n_args, const mp_obj_t *args, mp_map_t *kwargs) {
-    return mp_const_none;
-}
-MP_DEFINE_CONST_FUN_OBJ_KW(mp_builtin_open_obj, 1, mp_builtin_open);
+// mp_obj_t mp_builtin_open(size_t n_args, const mp_obj_t *args, mp_map_t *kwargs) {
+//     return mp_const_none;
+// }
+// MP_DEFINE_CONST_FUN_OBJ_KW(mp_builtin_open_obj, 1, mp_builtin_open);
 
 #if MICROPY_PY_ARRAY
 void poppy_add_memory_as_array(const char* name, void* data, size_t num_elts, char dtype) {
@@ -41070,17 +48717,24 @@ void poppy_do_str(const char *src, int is_single_line) {
 }
 #endif
 
-int mp_hal_stdin_rx_chr(void) {
-    return '\n';
+char * poppy_stdout_head = NULL;
+
+void poppy_set_stdout(char* _stdout) {
+    poppy_stdout_head = _stdout;
+    *poppy_stdout_head = '\0';
 }
 
-char * poppy_stdout_head = NULL;
 void mp_hal_stdout_tx_strn(const char *str, mp_uint_t len) {
     if (poppy_stdout_head == NULL) return;
     for (int i = 0; i < len; ++i) {
         (*poppy_stdout_head++) = str[i];
     }
     *poppy_stdout_head = '\0';
+}
+
+// Send zero-terminated string
+void mp_hal_stdout_tx_str(const char *str) {
+    mp_hal_stdout_tx_strn(str, strlen(str));
 }
 
 void mp_hal_stdout_tx_strn_cooked(const char *str, size_t len) {
@@ -41102,8 +48756,14 @@ void mp_hal_stdout_tx_strn_cooked(const char *str, size_t len) {
     }
 }
 
+uint64_t mp_hal_time_ns(void) {
+    uint64_t ns = 1;
+    return ns;
+}
+
+
 #if MICROPY_ENABLE_GC
-static char poppy_heap[150*1024];
+static char poppy_heap[100*1024];
 #endif
 
 #if MICROPY_ENABLE_PYSTACK
@@ -41114,7 +48774,7 @@ void poppy_init(char *stdout_memory, char *poplar_stack_bottom) {
     if (NULL != stdout_memory) {
         *stdout_memory = '\0';
     }
-    poppy_stdout_head = stdout_memory;
+    poppy_set_stdout(stdout_memory);
     poppy_stack_top = poplar_stack_bottom;
 
     #if MICROPY_ENABLE_GC
@@ -41132,3 +48792,26 @@ void poppy_init(char *stdout_memory, char *poplar_stack_bottom) {
 void poppy_deinit() {
     mp_deinit();
 }
+
+
+// ----- Dubious vertex reentry mechanism ------ //
+
+
+
+jmp_buf poppy_exit_env;
+jmp_buf poppy_checkpoint_env;
+
+char * poppy_stdin_head = NULL;
+
+void poppy_set_stdin(char* _stdin) {
+    poppy_stdin_head = _stdin;
+}
+
+int mp_hal_stdin_rx_chr(void) {
+    if (NULL == poppy_stdin_head) return '\n';
+    char c = *poppy_stdin_head;
+    poppy_stdin_head += 1;
+    return c;
+}
+
+

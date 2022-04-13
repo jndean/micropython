@@ -274,6 +274,7 @@ STATIC const char *const tok_kw[] = {
     "elif",
     "else",
     "except",
+    "exchange",
     "finally",
     "for",
     "from",
