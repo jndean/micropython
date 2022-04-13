@@ -1,3 +1,14 @@
+
+// ----------- Dubious vertex reentry mechanism ---------- //
+
+#include "ipusetjmp.h"
+
+jmp_buf poppy_exit_env = {0};
+jmp_buf poppy_checkpoint_env = {0};
+
+
+// --------------- py/*.c -------------------- //
+
 #include "mpconfigport.h"
 
 
@@ -38560,7 +38571,10 @@ dispatch_loop:
                 }
                 
                 ENTRY(MP_BC_EXCHANGE): {
-                    mp_hal_stdout_tx_strn("Exchange triggered\n", 19);
+                    int is_reentering = setjmp(poppy_checkpoint_env);
+                    if (!is_reentering) {
+                        longjmp(poppy_exit_env, 1);
+                    }
                     DISPATCH();
                 }
 
@@ -48684,10 +48698,6 @@ void nlr_jump_fail(void *val) {
     __builtin_unreachable();
 }
 
-// mp_obj_t mp_builtin_open(size_t n_args, const mp_obj_t *args, mp_map_t *kwargs) {
-//     return mp_const_none;
-// }
-// MP_DEFINE_CONST_FUN_OBJ_KW(mp_builtin_open_obj, 1, mp_builtin_open);
 
 #if MICROPY_PY_ARRAY
 void poppy_add_memory_as_array(const char* name, void* data, size_t num_elts, char dtype) {
@@ -48721,7 +48731,9 @@ char * poppy_stdout_head = NULL;
 
 void poppy_set_stdout(char* _stdout) {
     poppy_stdout_head = _stdout;
-    *poppy_stdout_head = '\0';
+    if (_stdout != NULL) {
+        *poppy_stdout_head = '\0';
+    }
 }
 
 void mp_hal_stdout_tx_strn(const char *str, mp_uint_t len) {
@@ -48793,13 +48805,6 @@ void poppy_deinit() {
     mp_deinit();
 }
 
-
-// ----- Dubious vertex reentry mechanism ------ //
-
-
-
-jmp_buf poppy_exit_env;
-jmp_buf poppy_checkpoint_env;
 
 char * poppy_stdin_head = NULL;
 

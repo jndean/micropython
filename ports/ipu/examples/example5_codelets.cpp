@@ -13,85 +13,79 @@ extern "C" void poppy_do_str(const char *src, int is_single_line);
 */
 DEF_STACK_USAGE(0, "poppy_set_stdin");
 extern "C" void poppy_set_stdin(char* _stdin);
+DEF_STACK_USAGE(RECURSIVE_FUNCTION_SIZE, "poppy_set_stdout");
+extern "C" void poppy_set_stdout(char* _stdout);
 DEF_STACK_USAGE(RECURSIVE_FUNCTION_SIZE, "pyexec_event_repl_init");
 extern "C" void pyexec_event_repl_init();
 DEF_STACK_USAGE(RECURSIVE_FUNCTION_SIZE, "pyexec_event_repl_process_char");
 extern "C" int pyexec_event_repl_process_char(int c);
-DEF_STACK_USAGE(RECURSIVE_FUNCTION_SIZE, "poppy_set_stdout");
-extern "C" void poppy_set_stdout(char* _stdout);
 
-class InitVertex: public poplar::Vertex {
+typedef struct jmp_buf_t {
+    unsigned int MRF[5];
+    float ARF[2];
+} jmp_buf[1];
+DEF_STACK_USAGE(RECURSIVE_FUNCTION_SIZE, "setjmp");
+extern "C" int __attribute__((noinline)) setjmp(jmp_buf env);
+DEF_STACK_USAGE(RECURSIVE_FUNCTION_SIZE, "longjmp");
+extern "C" void __attribute__((noreturn)) longjmp(jmp_buf env, int val);
+extern "C" jmp_buf poppy_exit_env;
+extern "C" jmp_buf poppy_checkpoint_env;
+
+class InitVertex: public poplar::MultiVertex {
     public:
-    poplar::InOut<poplar::Vector<char>> diskImg;
+    // poplar::InOut<poplar::Vector<char>> diskImg;
     poplar::InOut<poplar::Vector<char>> printBuf;
     poplar::InOut<poplar::Vector<char>> inBuf;
     poplar::InOut<bool> doneFlag;
 
-    bool compute() {
+    bool compute(unsigned tid) {
         char* poplar_stack_bottom;
+        
+        if (tid != 5) return true;
         asm volatile(
             "mov %[poplar_stack_bottom], $m11" 
             : [poplar_stack_bottom] "+r" (poplar_stack_bottom) ::
         );
         poppy_init(&printBuf[0], poplar_stack_bottom);
-        poppy_add_memory_as_array("__diskimg", &diskImg[0], diskImg.size(), 'b');
-        poppy_do_str(R"(
-import uos as os
-
-class TensorBlockDevice:
-    def __init__(self, block_size):
-        self.block_size = block_size
-
-    def readblocks(self, block_num, buf, offset=0):
-        addr = block_num * self.block_size + offset
-        poppyyield
-        for i in range(len(buf)):
-            buf[i] = __diskimg[addr + i]
-
-    def writeblocks(self, block_num, buf, offset=None):
-        if offset is None:
-            # do erase, then write
-            for i in range(len(buf) // self.block_size):
-                self.ioctl(6, block_num + i)
-            offset = 0
-        addr = block_num * self.block_size + offset
-        for i in range(len(buf)):
-            __diskimg[addr + i] = buf[i]
-
-    def ioctl(self, op, arg):
-        if op == 4: # block count
-            return len(__diskimg) // self.block_size
-        if op == 5: # block size
-            return self.block_size
-        if op == 6: # block erase
-            return 0
-
-__disk_device = TensorBlockDevice(block_size=512)
-#os.VfsLfs2.mkfs(__bdev)
-os.mount(__disk_device, '/')
-
-)", 0);
+        poppy_add_memory_as_array("inbuf", &inBuf[0], inBuf.size(), 'b');
 
         *doneFlag = false;
-        pyexec_event_repl_init();
-    
+   
         return true;
     }
 };
 
+bool checkpoint_is_live = false;
 
-
-class RTVertex: public poplar::Vertex {
+class RTVertex: public poplar::MultiVertex {
     public:
-    poplar::InOut<poplar::Vector<char>> diskImg;
+    // poplar::InOut<poplar::Vector<char>> diskImg;
     poplar::InOut<poplar::Vector<char>> printBuf;
     poplar::InOut<poplar::Vector<char>> inBuf;
     poplar::InOut<bool> doneFlag;
 
-    bool compute() {
+    bool compute(unsigned tid) {
+        if (tid != 5) return true;
+
+        if (checkpoint_is_live) {
+            checkpoint_is_live = false;
+            longjmp(poppy_checkpoint_env, 1);
+        }
+        checkpoint_is_live = setjmp(poppy_exit_env);
+        if (checkpoint_is_live) {
+            return true;
+        }
+
         poppy_set_stdout(&printBuf[0]);
-        char c = inBuf[0];
-        *doneFlag = (c == '\0') || pyexec_event_repl_process_char(c);
+        
+        poppy_do_str(R"(
+for x in range(5):
+    print('inBuf:', inbuf)
+    exchange
+)", 0);
+
+
+        *doneFlag = true;
         return true;
     }
 };

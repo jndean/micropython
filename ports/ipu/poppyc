@@ -162,6 +162,9 @@ def main(args, popc_args):
             ["popc", compiled_file.name, libname, "-o", args.outfile] + popc_args,
             stderr=subprocess.PIPE, encoding="UTF-8"
         )
+        if result.returncode:
+            print('Linking with popc failed with following stderr output:\n', result.stderr)
+
 
 
 if __name__ == "__main__":
