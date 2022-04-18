@@ -5014,7 +5014,6 @@ STATIC const char *const tok_kw[] = {
     "elif",
     "else",
     "except",
-    "exchange",
     "finally",
     "for",
     "from",
@@ -5024,6 +5023,7 @@ STATIC const char *const tok_kw[] = {
     "in",
     "is",
     "lambda",
+    "longyield",
     "nonlocal",
     "not",
     "or",
@@ -8031,8 +8031,8 @@ STATIC void compile_break_cont_stmt(compiler_t *comp, mp_parse_node_struct_t *pn
     EMIT_ARG(unwind_jump, label, comp->cur_except_level - comp->break_continue_except_level);
 }
 
-STATIC void compile_exchange_stmt(compiler_t *comp, mp_parse_node_struct_t *pns) {
-    EMIT(exchange);
+STATIC void compile_longyield_stmt(compiler_t *comp, mp_parse_node_struct_t *pns) {
+    EMIT(longyield);
 }
 
 STATIC void compile_return_stmt(compiler_t *comp, mp_parse_node_struct_t *pns) {
@@ -11231,8 +11231,8 @@ void mp_emit_bc_pop_top(emit_t *emit) {
     emit_write_bytecode_byte(emit, -1, MP_BC_POP_TOP);
 }
 
-void mp_emit_bc_exchange(emit_t *emit) {
-    emit_write_bytecode_byte(emit, 0, MP_BC_EXCHANGE);
+void mp_emit_bc_longyield(emit_t *emit) {
+    emit_write_bytecode_byte(emit, 0, MP_BC_LONGYIELD);
 }
 
 void mp_emit_bc_rot_two(emit_t *emit) {
@@ -38570,7 +38570,7 @@ dispatch_loop:
                     DISPATCH();
                 }
                 
-                ENTRY(MP_BC_EXCHANGE): {
+                ENTRY(MP_BC_LONGYIELD): {
                     int is_reentering = setjmp(poppy_checkpoint_env);
                     if (!is_reentering) {
                         longjmp(poppy_exit_env, 1);
@@ -47946,16 +47946,33 @@ STATIC void mp_hal_move_cursor_back(uint pos) {
         // fast path for most common case of 1 step back
         mp_hal_stdout_tx_strn("\b\b\b\b", pos);
     } else {
-        // char vt100_command[6];
+        assert(pos < 1000u);
         // snprintf needs space for the terminating null character
         // int n = snprintf(&vt100_command[0], sizeof(vt100_command), "\x1b[%u", pos);
-        char vt100_command[46] = "\nmp_hal_move_cursor_back not implemented :)\n";
-        int n = 45;
-        if (n > 0) {
-            assert((unsigned)n < sizeof(vt100_command));
-            vt100_command[n] = 'D'; // replace null char
-            mp_hal_stdout_tx_strn(vt100_command, n + 1);
+        
+        // char vt100_command[46] = "\nmp_hal_move_cursor_back not implemented :)\n";
+        char vt100_command[6] = "\x1b[DDDD";
+        int n;
+        if (pos > 99) {
+            vt100_command[2] = 0x30 + (pos / 100);
+            vt100_command[3] = 0x30 + ((pos % 100) / 10);
+            vt100_command[4] = 0x30 + (pos % 10);
+            n = 6;
+        } else if (pos > 9) {
+            vt100_command[2] = 0x30 + ((pos % 100) / 10);
+            vt100_command[3] = 0x30 + (pos % 10);
+            n = 5;
+        } else {
+            vt100_command[2] = 0x30 + (pos % 10);
+            n = 4;
         }
+        mp_hal_stdout_tx_strn(vt100_command, n);
+
+        // if (n > 0) {
+        //     assert((unsigned)n < sizeof(vt100_command));
+        //     vt100_command[n] = 'D'; // replace null char
+        //     mp_hal_stdout_tx_strn(vt100_command, n + 1);
+        // }
     }
 }
 
@@ -48728,18 +48745,23 @@ void poppy_do_str(const char *src, int is_single_line) {
 #endif
 
 char * poppy_stdout_head = NULL;
+char * poppy_stdout_end = NULL;
 
-void poppy_set_stdout(char* _stdout) {
+void poppy_set_stdout(char* _stdout, int len) {
     poppy_stdout_head = _stdout;
-    if (_stdout != NULL) {
+    if (poppy_stdout_head != NULL) {
         *poppy_stdout_head = '\0';
+        poppy_stdout_end = poppy_stdout_head + (len - 1);
     }
 }
 
 void mp_hal_stdout_tx_strn(const char *str, mp_uint_t len) {
     if (poppy_stdout_head == NULL) return;
-    for (int i = 0; i < len; ++i) {
-        (*poppy_stdout_head++) = str[i];
+    for (int i = 0; 
+         i < len && poppy_stdout_head < poppy_stdout_end; 
+        ++i, ++poppy_stdout_head) 
+    {
+        *poppy_stdout_head = str[i];
     }
     *poppy_stdout_head = '\0';
 }
@@ -48769,24 +48791,29 @@ void mp_hal_stdout_tx_strn_cooked(const char *str, size_t len) {
 }
 
 uint64_t mp_hal_time_ns(void) {
-    uint64_t ns = 1;
+    uint64_t ns = 0;
+    /*asm volatile(
+        "shl %[ns], $COUNT_U,   2 \n"
+        "shr   $m1, $COUNT_L,  30 \n"
+        "or  %[ns],    %[ns], $m1 \n"
+        : [ns] "+r" (ns)
+        : 
+        : "$m1"
+    );*/
     return ns;
 }
 
 
 #if MICROPY_ENABLE_GC
-static char poppy_heap[100*1024];
+static char poppy_heap[200*1024];
 #endif
 
 #if MICROPY_ENABLE_PYSTACK
 static mp_obj_t poppy_pystack[5 * 1024];
 #endif
 
-void poppy_init(char *stdout_memory, char *poplar_stack_bottom) {
-    if (NULL != stdout_memory) {
-        *stdout_memory = '\0';
-    }
-    poppy_set_stdout(stdout_memory);
+void poppy_init(char *poplar_stack_bottom) {
+
     poppy_stack_top = poplar_stack_bottom;
 
     #if MICROPY_ENABLE_GC

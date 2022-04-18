@@ -11,10 +11,78 @@
 #include <poplar/IPUModel.hpp>
 #include <poplar/Program.hpp>
 
+#include "example7.hpp"
+
 using namespace poplar;
 
-
 Device getIPU(bool use_hardware = true, int num_ipus = 1);
+
+// ----------------------- Globals ----------------------- //
+const unsigned printBufSize = 2048;
+const int VfsBlockSize = 512;
+const int VfsNumBlocks = 40;
+Tensor printBuf;
+Tensor changeSubprocess;
+Tensor actionFlag;
+Tensor vfsPos;
+Tensor vfsDataBlock;
+DataStream printBufStream;
+char printBuf_h[printBufSize];
+
+void create_globals(Graph& graph) {
+  const int tile = 0;
+
+  printBuf = graph.addVariable(CHAR, {printBufSize}, "printBuf");
+  actionFlag = graph.addVariable(INT, {}, "actionFlag");
+  changeSubprocess = graph.addVariable(BOOL, {}, "changeSubprocess");
+  vfsPos = graph.addVariable(INT, {}, "vfsPos");
+  vfsDataBlock = graph.addVariable(CHAR, {VfsBlockSize}, "vfsDataBlock");
+
+  graph.setTileMapping(printBuf, tile);
+  graph.setTileMapping(changeSubprocess, tile);
+  graph.setTileMapping(actionFlag, tile);
+  graph.setTileMapping(vfsPos, tile);
+  graph.setTileMapping(vfsDataBlock, tile);
+
+  printBufStream = graph.addDeviceToHostFIFO("printBuf-stream", poplar::CHAR, printBufSize);
+}
+
+
+// ----------------------- Main terminal ----------------------- //
+const unsigned terminalInBufSize = 256;
+char terminalInBuf_h[terminalInBufSize];
+Tensor terminalInBuf;
+DataStream terminalInBufStream;
+
+program::Sequence create_terminal(Graph& graph) {
+  int tile = 0;
+  
+  terminalInBuf = graph.addVariable(CHAR, {terminalInBufSize}, "terminalInBuf");
+  graph.setTileMapping(terminalInBuf, tile);
+  terminalInBufStream = graph.addHostToDeviceFIFO("terminalInBuf-stream", poplar::CHAR, terminalInBufSize);
+  
+  ComputeSet initCS = graph.addComputeSet("TerminalInitCS");
+  VertexRef initVtx = graph.addVertex(initCS, "TerminalInit", {
+    {"printBuf", printBuf}, {"changeSubprocess", changeSubprocess}, {"actionFlag", actionFlag}, {"vfsPos", vfsPos}, 
+    {"vfsDataBlock", vfsDataBlock}, {"terminalInBuf", terminalInBuf}
+  });
+  graph.setTileMapping(initVtx, tile);
+
+  ComputeSet bodyCS = graph.addComputeSet("TerminalBodyCS");
+  VertexRef bodyVtx = graph.addVertex(initCS, "TerminalBody", {
+    {"printBuf", printBuf}, {"changeSubprocess", changeSubprocess}, {"actionFlag", actionFlag}, {"vfsPos", vfsPos}, 
+    {"vfsDataBlock", vfsDataBlock}, {"terminalInBuf", terminalInBuf}
+  });
+  graph.setTileMapping(bodyVtx, tile);
+
+  
+  program::Sequence program({
+    program::Execute(initCS),
+    program::Copy(printBuf, printBufStream),
+    program::RepeatWhileTrue(program::Sequence(), terminalIsLive, program::Sequence({
+      program::Execute(bodyCS)
+  });
+}
 
 
 int main() {
@@ -24,10 +92,6 @@ int main() {
 
   // Create variable in IPU memory to store program outputs
   unsigned diskSize = 512 * 32;
-  unsigned printBufSize = 1000;
-  unsigned inBufSize = 2;
-  char printBuf_h[printBufSize];
-  char inBuf_h[inBufSize];
   char diskImg_h[diskSize];
   
   std::ifstream infile("disk.img", std::ios::in);
@@ -39,7 +103,6 @@ int main() {
 
 
   Tensor diskImg = graph.addVariable(CHAR, {diskSize}, "diskImg");
-  Tensor printBuf = graph.addVariable(CHAR, {printBufSize}, "printBuf");
   Tensor inBuf = graph.addVariable(CHAR, {inBufSize}, "inBuf");
   Tensor doneFlag = graph.addVariable(BOOL, {}, "doneFlag");
   graph.setTileMapping(printBuf, 0);

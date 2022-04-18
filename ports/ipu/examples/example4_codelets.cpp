@@ -2,14 +2,16 @@
 /*  Provided by preprocessor
 #include "poplar/StackSizeDefs.hpp" 
 #define RECURSIVE_FUNCTION_SIZE (5 * 1024)
-DEF_STACK_USAGE(RECURSIVE_FUNCTION_SIZE, "poppy_init");
 extern "C" void poppy_deinit(void);
+DEF_STACK_USAGE(RECURSIVE_FUNCTION_SIZE, "poppy_init");
 DEF_STACK_USAGE(RECURSIVE_FUNCTION_SIZE, "poppy_deinit");
 DEF_STACK_USAGE(RECURSIVE_FUNCTION_SIZE, "poppy_add_memory_as_array");
 DEF_STACK_USAGE(RECURSIVE_FUNCTION_SIZE, "poppy_do_str");
+DEF_STACK_USAGE(RECURSIVE_FUNCTION_SIZE, "poppy_set_stdout");
 extern "C" void poppy_init(char *stdout_memory, char *poplar_stack_bottom);
 extern "C" void poppy_add_memory_as_array(const char* name, void* data, size_t num_elts, char dtype);
 extern "C" void poppy_do_str(const char *src, int is_single_line);
+extern "C" void poppy_set_stdout(char* _stdout);
 */
 DEF_STACK_USAGE(0, "poppy_set_stdin");
 extern "C" void poppy_set_stdin(char* _stdin);
@@ -17,8 +19,6 @@ DEF_STACK_USAGE(RECURSIVE_FUNCTION_SIZE, "pyexec_event_repl_init");
 extern "C" void pyexec_event_repl_init();
 DEF_STACK_USAGE(RECURSIVE_FUNCTION_SIZE, "pyexec_event_repl_process_char");
 extern "C" int pyexec_event_repl_process_char(int c);
-DEF_STACK_USAGE(RECURSIVE_FUNCTION_SIZE, "poppy_set_stdout");
-extern "C" void poppy_set_stdout(char* _stdout);
 
 class InitVertex: public poplar::Vertex {
     public:
@@ -33,7 +33,8 @@ class InitVertex: public poplar::Vertex {
             "mov %[poplar_stack_bottom], $m11" 
             : [poplar_stack_bottom] "+r" (poplar_stack_bottom) ::
         );
-        poppy_init(&printBuf[0], poplar_stack_bottom);
+        poppy_set_stdout(&printBuf[0], printBuf.size());
+        poppy_init(poplar_stack_bottom);
         poppy_add_memory_as_array("__diskimg", &diskImg[0], diskImg.size(), 'b');
         poppy_do_str(R"(
 import uos as os
@@ -66,7 +67,7 @@ class TensorBlockDevice:
             return 0
 
 __disk_device = TensorBlockDevice(block_size=512)
-#os.VfsLfs2.mkfs(__bdev)
+#os.VfsLfs2.mkfs(__disk_device)
 os.mount(__disk_device, '/')
 
 )", 0);
@@ -88,7 +89,7 @@ class RTVertex: public poplar::Vertex {
     poplar::InOut<bool> doneFlag;
 
     bool compute() {
-        poppy_set_stdout(&printBuf[0]);
+        poppy_set_stdout(&printBuf[0], printBuf.size());
         char c = inBuf[0];
         *doneFlag = (c == '\0') || pyexec_event_repl_process_char(c);
         return true;

@@ -148,6 +148,6 @@
 #define MP_BC_IMPORT_STAR                   (MP_BC_BASE_BYTE_E + 0x09)
 
 
-#define MP_BC_EXCHANGE                      (MP_BC_BASE_BYTE_E + 0x0b)
+#define MP_BC_LONGYIELD                      (MP_BC_BASE_BYTE_E + 0x0b)
 
 #endif // MICROPY_INCLUDED_PY_BC0_H

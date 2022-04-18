@@ -33,6 +33,8 @@
 #define MICROPY_PY_BUILTINS_SET            (1)
 #define MICROPY_PY_BUILTINS_ENUMERATE      (1)
 #define MICROPY_PY_BUILTINS_STR_SPLITLINES (1)
+#define MICROPY_PY_BUILTINS_MIN_MAX        (1)
+#define MICROPY_PY_BUILTINS_INPUT          (0)
 #define MICROPY_FLOAT_IMPL                 (MICROPY_FLOAT_IMPL_FLOAT)
 #define MICROPY_PY_UOS                     (1)
 #define MICROPY_VFS                        (1)

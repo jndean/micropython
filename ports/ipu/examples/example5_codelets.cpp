@@ -1,24 +1,19 @@
 #include <poplar/Vertex.hpp>
+
 /*  Provided by preprocessor
 #include "poplar/StackSizeDefs.hpp" 
 #define RECURSIVE_FUNCTION_SIZE (5 * 1024)
 DEF_STACK_USAGE(RECURSIVE_FUNCTION_SIZE, "poppy_init");
-extern "C" void poppy_deinit(void);
+DEF_STACK_USAGE(RECURSIVE_FUNCTION_SIZE, "poppy_set_stdout");
 DEF_STACK_USAGE(RECURSIVE_FUNCTION_SIZE, "poppy_deinit");
 DEF_STACK_USAGE(RECURSIVE_FUNCTION_SIZE, "poppy_add_memory_as_array");
 DEF_STACK_USAGE(RECURSIVE_FUNCTION_SIZE, "poppy_do_str");
 extern "C" void poppy_init(char *stdout_memory, char *poplar_stack_bottom);
+extern "C" void poppy_deinit(void);
 extern "C" void poppy_add_memory_as_array(const char* name, void* data, size_t num_elts, char dtype);
 extern "C" void poppy_do_str(const char *src, int is_single_line);
-*/
-DEF_STACK_USAGE(0, "poppy_set_stdin");
-extern "C" void poppy_set_stdin(char* _stdin);
-DEF_STACK_USAGE(RECURSIVE_FUNCTION_SIZE, "poppy_set_stdout");
 extern "C" void poppy_set_stdout(char* _stdout);
-DEF_STACK_USAGE(RECURSIVE_FUNCTION_SIZE, "pyexec_event_repl_init");
-extern "C" void pyexec_event_repl_init();
-DEF_STACK_USAGE(RECURSIVE_FUNCTION_SIZE, "pyexec_event_repl_process_char");
-extern "C" int pyexec_event_repl_process_char(int c);
+*/
 
 typedef struct jmp_buf_t {
     unsigned int MRF[5];
@@ -31,37 +26,37 @@ extern "C" void __attribute__((noreturn)) longjmp(jmp_buf env, int val);
 extern "C" jmp_buf poppy_exit_env;
 extern "C" jmp_buf poppy_checkpoint_env;
 
+
 class InitVertex: public poplar::MultiVertex {
     public:
-    // poplar::InOut<poplar::Vector<char>> diskImg;
     poplar::InOut<poplar::Vector<char>> printBuf;
-    poplar::InOut<poplar::Vector<char>> inBuf;
+    poplar::InOut<poplar::Vector<char>> msgBuf;
     poplar::InOut<bool> doneFlag;
 
     bool compute(unsigned tid) {
-        char* poplar_stack_bottom;
-        
         if (tid != 5) return true;
+        
+        char* poplar_stack_bottom;
         asm volatile(
             "mov %[poplar_stack_bottom], $m11" 
             : [poplar_stack_bottom] "+r" (poplar_stack_bottom) ::
         );
-        poppy_init(&printBuf[0], poplar_stack_bottom);
-        poppy_add_memory_as_array("inbuf", &inBuf[0], inBuf.size(), 'b');
+        poppy_set_stdout(&printBuf[0], printBuf.size());
+        poppy_init(poplar_stack_bottom);
+        poppy_add_memory_as_array("msgBuf", &msgBuf[0], msgBuf.size(), 'b');
 
         *doneFlag = false;
-   
         return true;
     }
 };
+
 
 bool checkpoint_is_live = false;
 
 class RTVertex: public poplar::MultiVertex {
     public:
-    // poplar::InOut<poplar::Vector<char>> diskImg;
     poplar::InOut<poplar::Vector<char>> printBuf;
-    poplar::InOut<poplar::Vector<char>> inBuf;
+    poplar::InOut<poplar::Vector<char>> msgBuf;
     poplar::InOut<bool> doneFlag;
 
     bool compute(unsigned tid) {
@@ -75,19 +70,25 @@ class RTVertex: public poplar::MultiVertex {
         if (checkpoint_is_live) {
             return true;
         }
-
-        poppy_set_stdout(&printBuf[0]);
-        
+        poppy_set_stdout(&printBuf[0], printBuf.size());
         poppy_do_str(R"(
-for x in range(5):
-    print('inBuf:', inbuf)
-    exchange
-)", 0);
 
+
+def main():
+    message = ""
+    while message != "STOP":
+        longyield
+        message = "".join(chr(byte) for byte in msgBuf)
+        print("Received:", message)
+
+if __name__ == "__main__":
+    main()
+
+
+)", 0);
 
         *doneFlag = true;
         return true;
     }
 };
-
 
