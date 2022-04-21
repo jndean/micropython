@@ -9,7 +9,7 @@ class LogicalConv3Cpp: public poplar::Vertex {
     poplar::InOut<poplar::Vector<int>> input;
     poplar::Output<poplar::Vector<int>> output;
 
-    bool compute() { 
+    bool compute() {
 
         for (int i = 0; i < output.size(); ++i) {
             int result = 0;
@@ -45,7 +45,7 @@ class LogicalConv3Asm: public poplar::Vertex {
             ld32 $m3, $m0, $m15, 0
             ld32 $m2, $m0, $m15, 2
             add $m3, $m3, 8
-    .step_window:                                
+    .step_window:
             add $m4, $m15, -8
             add $m5, $m15, -4
             ld32 $m4, $m3, $m4, 0

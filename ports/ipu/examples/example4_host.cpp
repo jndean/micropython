@@ -83,7 +83,7 @@ int main() {
   engine.connectStreamToCallback("inBuf-stream", [](void* p){*((char*)p) = getchar();});
   engine.load(device);
 
-  // Put terminal in raw mode so we can send singel key pressed
+  // Put terminal in raw mode so we can send single key pressed
   system("stty raw opost -echo");
   engine.run(0);
   system("stty cooked opost echo");

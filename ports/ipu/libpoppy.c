@@ -48793,9 +48793,9 @@ void mp_hal_stdout_tx_strn_cooked(const char *str, size_t len) {
 uint64_t mp_hal_time_ns(void) {
     uint64_t ns = 0;
     /*asm volatile(
-        "shl %[ns], $COUNT_U,   2 \n"
-        "shr   $m1, $COUNT_L,  30 \n"
-        "or  %[ns],    %[ns], $m1 \n"
+        "shl %[ns], $COUNT_U, 2 \n"
+        "shr $m1, $COUNT_L,  30 \n"
+        "or %[ns], %[ns], $m1   \n"
         : [ns] "+r" (ns)
         : 
         : "$m1"

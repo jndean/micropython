@@ -62,11 +62,11 @@ int main() {
 
   // Print output
   std::cout << "{";
-  for (int i = 0; i < N; ++i) {
+  for (unsigned i = 0; i < N; ++i) {
     std::cout << input_h[i] << ", ";
   }
   std::cout << "}  -->  {";
-  for (int i = 0; i < N/K; ++i) {
+  for (unsigned i = 0; i < N/K; ++i) {
     std::cout << output_h[i] << ", ";
   }
   std::cout << "}" << std::endl;

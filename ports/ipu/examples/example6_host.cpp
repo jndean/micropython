@@ -21,7 +21,7 @@ int main() {
 
   Device device = getIPU(true);
   Graph graph(device.getTarget());
-  int numTiles = device.getTarget().getNumTiles();
+  // int numTiles = device.getTarget().getNumTiles();
 
   unsigned blockSize = 256; //numTiles - 1;
   unsigned numBlocks = 40;
@@ -55,7 +55,7 @@ int main() {
   graph.setTileMapping(int_vtx, 0);
   graph.setTileMapping(body_vtx, 0);
   
-  for (int i = 0; i < blockSize; ++i) {
+  for (unsigned i = 0; i < blockSize; ++i) {
     auto diskSlice = disk.slice(i * numBlocks, (i + 1) * numBlocks);
     VertexRef readwrite_vtx = graph.addVertex(readwrite_computeset, "ReadWriteVertex", {
       {"disk", diskSlice}, 
